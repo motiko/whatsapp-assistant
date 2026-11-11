@@ -10,12 +10,16 @@ import { PageNotRecognisedError, type ChatItem, type Rect, type WhatsAppPage } f
  * - `date-range`: every message from the start of local day `from` to the end
  *   of local day `to` (both included, as WhatsApp Web's date dividers show days);
  * - `full-chat`: every message WhatsApp Web can load, oldest to newest;
+ * - `continuation`: a Continuation of a Partial Chat Record, from right after
+ *   the last message it holds (found again by its id; failing that, from the
+ *   start of its day, overlapping it) to the end of the original request;
  * - `visible`: just the chat area currently on screen.
  */
 export type ChatRecordRequest =
   | { kind: 'visible' }
   | { kind: 'date-range'; from: LocalDay; to: LocalDay }
-  | { kind: 'full-chat' };
+  | { kind: 'full-chat' }
+  | { kind: 'continuation'; from: ContinuationPoint };
 
 export interface ChatRecord {
   /** The Chat this record is of. */
@@ -173,7 +177,12 @@ async function recordOnce(deps: Deps, request: ChatRecordRequest, options: Recor
   };
   try {
     run.checkpoint();
-    const outcome = request.kind === 'visible' ? await recordVisible(run) : await recordDays(run, request);
+    const outcome =
+      request.kind === 'visible'
+        ? await recordVisible(run)
+        : request.kind === 'continuation'
+          ? await recordContinuation(run, request.from)
+          : await recordDays(run, request);
     run.checkpoint();
     return outcome;
   } catch (error) {
@@ -340,6 +349,106 @@ async function recordDays(run: Run, request: RangeRequest): Promise<ChatRecordOu
   return { kind: 'record', record: await wholeRecord(record) };
 }
 
+/**
+ * Records from right after the last message of a Partial Chat Record to the
+ * end of the request it was part of.
+ */
+async function recordContinuation(run: Run, point: ContinuationPoint): Promise<ChatRecordOutcome> {
+  const { page } = run;
+  const chatName = page.chatName();
+  if (chatName !== point.chatName) throw new Error(`the open Chat is not “${point.chatName}”`);
+  const area = page.chatArea();
+  const takenAt = run.clock();
+  const last = point.lastMessage;
+  const to = point.request.kind === 'full-chat' ? afterEveryDay : point.request.to;
+  const nothingAfter: ChatRecordOutcome = { kind: 'no-messages', from: last.day, to: to === afterEveryDay ? last.day : to };
+
+  const located = await scrollToContinue(run, last, area.height);
+  if (!located) return nothingAfter;
+  const notes = [
+    located.after
+      ? `Continues “${point.partialFileName}” right after its last message (${describeMessage(last)})`
+      : `Continues “${point.partialFileName}” from the start of ${located.day}, overlapping it`,
+  ];
+
+  const walked = newWalked();
+  const failure = await walkCatching(run, area, located.start, { kind: 'day', to }, walked);
+  const spanFrom = located.after ? (walked.firstMessage?.day ?? last.day) : located.day;
+  const record = { run, chatName, takenAt, area, walked, notes, spanFrom };
+  if (failure) return partialRecord({ ...record, request: point.request, error: failure.error });
+  if (!walked.lastInRange) {
+    closeSlices(walked.slices);
+    return nothingAfter;
+  }
+  return { kind: 'record', record: await wholeRecord(record) };
+}
+
+/**
+ * Scrolls (loading older messages as needed) to where a Continuation starts:
+ * right after message `last`, found by its id, or, if it cannot be found,
+ * the start of its day (or of the first later day with messages). Resolves
+ * with where the walk starts, whether it is right after `last`, and the
+ * first day it covers; or undefined if no day from `last`'s on has messages.
+ */
+async function scrollToContinue(
+  run: Run,
+  last: ContinuationPoint['lastMessage'],
+  step: number,
+): Promise<{ start: WalkStart; after: boolean; day: LocalDay } | undefined> {
+  const found = await scrollToFirstDivider(run, last.day, step);
+  if (!found) return undefined;
+  if (found.divider.day === last.day) {
+    const message = await scrollToMessage(run, last, step);
+    if (message) return { start: afterMessageStart(message, last.day), after: true, day: last.day };
+    // Not there any more: start from its day's divider, which has scrolled out of reach meanwhile.
+    const again = await scrollToFirstDivider(run, last.day, step);
+    if (!again) return undefined;
+    return { start: dividerStart(again.divider), after: false, day: again.divider.day };
+  }
+  return { start: dividerStart(found.divider), after: false, day: found.divider.day };
+}
+
+type Message = Extract<ChatItem, { kind: 'message' }>;
+
+/**
+ * Scrolls down from day `last.day`'s divider (loaded at the current stop)
+ * until message `last` is loaded, shows it in full, and returns it (in
+ * content positions read at the last stop); or undefined once the next day
+ * or the end of the Chat is reached without it.
+ */
+async function scrollToMessage(run: Run, last: { id: string; day: LocalDay }, step: number): Promise<Message | undefined> {
+  const { page } = run;
+  const find = () =>
+    page.loadedItems().find((item): item is Message => item.kind === 'message' && item.id === last.id);
+  for (let stop = 0; stop < maxScrollStops; stop++) {
+    run.checkpoint();
+    const message = find();
+    if (message) {
+      // Its Partial Chat Record showed it in full, so start below it in full too.
+      await page.expandReadMore({ top: message.top, bottom: message.bottom });
+      run.checkpoint();
+      return find();
+    }
+    const scrollTop = page.scrollTop();
+    const nextDay = page.loadedItems().find((item) => item.kind === 'date-divider' && item.day > last.day);
+    // Every row above the screen has been loaded at some stop on the way down.
+    if (nextDay && nextDay.top <= scrollTop) return undefined;
+    if (scrollTop + step >= page.scrollHeight() - 1) return undefined;
+    await page.scrollTo(scrollTop + step);
+  }
+  throw new Error('WhatsApp Web did not stop scrolling');
+}
+
+/** Starts a walk right below `message`, a message of `day`. */
+function afterMessageStart(message: Message, day: LocalDay): WalkStart {
+  const top = message.top - message.bottom;
+  return {
+    origin: message.bottom,
+    anchors: new Map([[itemKey(message), top]]),
+    dividerRows: new Map([[day, top]]),
+  };
+}
+
 /** The parts of a Chat Record that a walk does not know. */
 interface RecordParts {
   run: Run;
@@ -435,6 +544,8 @@ interface Walked {
   lastInRange?: { row: number; day: LocalDay };
   /** The last message in range captured in full, with the record row of its bottom. */
   lastComplete?: { id: string; day: LocalDay; time?: string; row: number };
+  /** The first message in range below row 0. */
+  firstMessage?: { id: string; day: LocalDay };
 }
 
 function newWalked(): Walked {
@@ -497,7 +608,7 @@ async function walk(run: Run, area: Rect, start: WalkStart, end: WalkEnd, walked
     origin = anchoredOrigin(items, capturedTops);
 
     /** The messages in range at this stop, in record rows. */
-    const inRange: { item: Extract<ChatItem, { kind: 'message' }>; top: number; bottom: number; day: LocalDay }[] = [];
+    const inRange: { item: Message; top: number; bottom: number; day: LocalDay }[] = [];
     let day: LocalDay | undefined;
     for (const item of items) {
       const top = item.top - origin;
@@ -514,6 +625,7 @@ async function walk(run: Run, area: Rect, start: WalkStart, end: WalkEnd, walked
       day ??= dayAt(dividerRows, top);
       if (day > to) continue;
       inRange.push({ item, top, bottom, day });
+      walked.firstMessage ??= { id: item.id, day };
       if (!walked.lastInRange || bottom > walked.lastInRange.row) walked.lastInRange = { row: bottom, day };
     }
 

@@ -1,11 +1,13 @@
 import { describe, expect, test } from 'vitest';
 import { CaptureNotAllowedError, type Camera } from './camera';
-import { createChatRecorder, type ChatRecord, type ChatRecordOutcome } from './chat-recorder';
+import { createChatRecorder, type ChatRecord, type ChatRecordOutcome, type ChatRecordRequest } from './chat-recorder';
 import { drawContextBand } from './context-band';
 import { PageNotRecognisedError, type ChatItem, type WhatsAppPage } from './whatsapp-page';
 import { createFakeCamera, readScreenPositions } from './testing/fake-camera';
 import { readPdfPages } from './testing/read-pdf';
-import { createFakeWhatsAppPage, type FakeChatDay } from './testing/fake-whatsapp-page';
+import { createFakeWhatsAppPage, type FakeChatDay, type FakeWhatsAppPage } from './testing/fake-whatsapp-page';
+
+type FakePageOptions = Parameters<typeof createFakeWhatsAppPage>[0];
 
 const viewport = { width: 1280, height: 800 };
 // Chat list on the left (400px), Chat header above (60px), message box below (62px).
@@ -1227,3 +1229,158 @@ describe('Chat Record of the Full Chat', () => {
     expect(outcome).toEqual({ kind: 'empty-chat' });
   });
 });
+
+describe('a Continuation', () => {
+  const range = { kind: 'date-range', from: '2026-11-02', to: '2026-11-04' } as const;
+  const clock = () => new Date('2026-11-11T13:32:05Z');
+
+  /**
+   * The Partial Chat Record of `request` from a run whose Camera fails after
+   * `screens` screens, and its outcome.
+   */
+  async function failedRun(request: ChatRecordRequest, screens: number, pageOptions: Partial<FakePageOptions> = {}) {
+    const page = createFakeWhatsAppPage({ chatName: 'Alice', chatArea, chat: sixDays, ...pageOptions });
+    const camera = createFakeCamera({ viewport, page, fails: new Error('Tab is hidden'), failsAfter: screens });
+    const outcome = await createChatRecorder({ page, camera, clock }).record(request);
+    if (outcome.kind !== 'partial') throw new Error(`expected a Partial Chat Record, got ${outcome.kind}`);
+    return outcome;
+  }
+
+  /** A recorder on a freshly loaded WhatsApp Web (scrolled to the newest message), as after a reload. */
+  function freshRecorder(pageOptions: Partial<FakePageOptions> = {}, wrap: (page: FakeWhatsAppPage) => WhatsAppPage = (p) => p) {
+    const fake = createFakeWhatsAppPage({ chatName: 'Alice', chatArea, chat: sixDays, ...pageOptions });
+    const page = wrap(fake);
+    return createChatRecorder({ page, camera: createFakeCamera({ viewport, page: fake }), clock });
+  }
+
+  test('starts right after the last message captured and runs to the original end, every row once', async () => {
+    const partial = await failedRun(range, 1);
+
+    const outcome = await freshRecorder().record({ kind: 'continuation', from: partial.continuation });
+
+    // The partial record ends at 2 Nov's fifth message (bottom 1080); 4 Nov ends at 2160.
+    expect(outcome).toMatchObject({
+      kind: 'record',
+      record: {
+        span: { from: '2026-11-03', to: '2026-11-04' },
+        fileName: 'Chat history - Alice - 2026-11-03 to 2026-11-04.png',
+        contextBand: [
+          'Chat: Alice',
+          'Messages: 2026-11-03 to 2026-11-04',
+          'Taken: 2026-11-11 14:32 (UTC+01:00)',
+          'Continues “Chat history - Alice - 2026-11-02 (partial).png” right after its last message (2026-11-02 08:05)',
+        ],
+      },
+    });
+    const rows = [...(await chatRows(partial)), ...(await chatRows(outcome))];
+    expect(rows).toEqual(range540To(2160));
+  });
+
+  test('picks up mid-day, finding the message again while WhatsApp Web loads older messages and slides its list', async () => {
+    const chat = [
+      { day: '2026-11-01', messageHeights: [100, 100, 100, 100, 100] },
+      // 2 Nov: its divider at 540, then 34 messages to 3980, about five screens.
+      { day: '2026-11-02', messageHeights: Array<number>(34).fill(100) },
+      { day: '2026-11-03', messageHeights: [100, 100, 100] },
+    ];
+    const request = { kind: 'date-range', from: '2026-11-02', to: '2026-11-02' } as const;
+    const partial = await failedRun(request, 2, { chat, windowRows: 24 });
+    // Two screens reach 540 + 678 + 670 = 1888: the 13th message (1780-1880) is the last whole one.
+    expect(partial.continuation.lastMessage).toEqual({ id: '2026-11-02 #13', day: '2026-11-02', time: '08:13' });
+
+    // After a reload WhatsApp Web has only 2 Nov's last messages and 3 Nov loaded; older ones load as it scrolls up.
+    const outcome = await freshRecorder({ chat: chat.slice(1), olderMessages: chat.slice(0, 1), windowRows: 24 }).record({
+      kind: 'continuation',
+      from: partial.continuation,
+    });
+
+    expect(outcome).toMatchObject({ kind: 'record', record: { span: { from: '2026-11-02', to: '2026-11-02' } } });
+    expect([...(await chatRows(partial)), ...(await chatRows(outcome))]).toEqual(range540To(3980));
+  });
+
+  test('falls back to the start of the day when the last message cannot be found again, overlapping the partial record', async () => {
+    const partial = await failedRun(range, 1);
+    // WhatsApp Web no longer knows the message by that id.
+    const renamed = (page: FakeWhatsAppPage): WhatsAppPage => ({
+      ...page,
+      loadedItems: () =>
+        page.loadedItems().map((item) => (item.kind === 'message' && item.id === '2026-11-02 #5' ? { ...item, id: 'renamed' } : item)),
+    });
+
+    const outcome = await freshRecorder({}, renamed).record({ kind: 'continuation', from: partial.continuation });
+
+    expect(outcome).toMatchObject({
+      kind: 'record',
+      record: {
+        span: { from: '2026-11-02', to: '2026-11-04' },
+        contextBand: expect.arrayContaining([
+          'Continues “Chat history - Alice - 2026-11-02 (partial).png” from the start of 2026-11-02, overlapping it',
+        ]),
+      },
+    });
+    expect(await chatRows(outcome)).toEqual(range540To(2160));
+  });
+
+  test('of a Full Chat runs to the newest message', async () => {
+    const partial = await failedRun({ kind: 'full-chat' }, 2);
+
+    const outcome = await freshRecorder().record({ kind: 'continuation', from: partial.continuation });
+
+    expect(outcome).toMatchObject({ kind: 'record', record: { span: { to: '2026-11-06' } } });
+    expect([...(await chatRows(partial)), ...(await chatRows(outcome))]).toEqual(rowsFrom(0, 3240));
+  });
+
+  test('that fails too saves another Partial Chat Record, and its Continuation completes the range', async () => {
+    const chat = sixDays;
+    const request = { kind: 'date-range', from: '2026-11-01', to: '2026-11-06' } as const;
+    const first = await failedRun(request, 1);
+    const fails = (screens: number) => {
+      const page = createFakeWhatsAppPage({ chatName: 'Alice', chatArea, chat });
+      const camera = createFakeCamera({ viewport, page, fails: new Error('Tab is hidden'), failsAfter: screens });
+      return createChatRecorder({ page, camera, clock });
+    };
+
+    // From 1 Nov's last message (bottom 540), two screens reach 1888: 4 Nov's second message ends at 1860.
+    const second = await fails(2).record({ kind: 'continuation', from: first.continuation });
+
+    expect(second).toMatchObject({
+      kind: 'partial',
+      record: {
+        fileName: 'Chat history - Alice - 2026-11-02 to 2026-11-04 (partial).png',
+        contextBand: [
+          'Chat: Alice',
+          'Messages: 2026-11-02 to 2026-11-04',
+          'Taken: 2026-11-11 14:32 (UTC+01:00)',
+          'Continues “Chat history - Alice - 2026-11-01 (partial).png” right after its last message (2026-11-01 08:05)',
+          'Partial: stopped after 2026-11-04 08:02, run failed: Tab is hidden',
+        ],
+      },
+      continuation: {
+        request,
+        lastMessage: { id: '2026-11-04 #2', day: '2026-11-04', time: '08:02' },
+        partialFileName: 'Chat history - Alice - 2026-11-02 to 2026-11-04 (partial).png',
+      },
+    });
+    if (second.kind !== 'partial') return;
+    const third = await freshRecorder().record({ kind: 'continuation', from: second.continuation });
+
+    expect(third).toMatchObject({ kind: 'record', record: { span: { from: '2026-11-04', to: '2026-11-06' } } });
+    expect([...(await chatRows(first)), ...(await chatRows(second)), ...(await chatRows(third))]).toEqual(rowsFrom(0, 3240));
+  });
+});
+
+/** The Chat position of every row of a record's WhatsApp pixels, in order (x = 0, at a device pixel ratio of 1). */
+async function chatRows(made: ChatRecordOutcome | ChatRecord | undefined): Promise<number[]> {
+  const image = await recordedImage(made);
+  return Array.from({ length: image.height }, (_, row) => image.at(0, row).y);
+}
+
+/** Chat positions `from` up to, not including, `to`. */
+function rowsFrom(from: number, to: number): number[] {
+  return Array.from({ length: to - from }, (_, index) => from + index);
+}
+
+/** Chat positions 540 (2 Nov's divider in `sixDays`) up to `to`. */
+function range540To(to: number): number[] {
+  return rowsFrom(540, to);
+}
