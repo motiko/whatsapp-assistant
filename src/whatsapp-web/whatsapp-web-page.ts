@@ -1,6 +1,6 @@
 import { PageNotRecognisedError, type ChatItem, type Rect, type WhatsAppPage } from '../core/whatsapp-page';
 import { readDividerDay } from './divider-dates';
-import { selectors } from './selectors';
+import { olderMessagesPromptText, selectors } from './selectors';
 
 export interface WhatsAppWebPageOptions {
   /** Now, for reading "Today", "Yesterday" and weekday dividers. Defaults to the clock. */
@@ -13,6 +13,12 @@ export interface WhatsAppWebPageOptions {
    * after scrolling). Defaults to 300 ms.
    */
   settleMs?: number;
+  /**
+   * How long to wait for older messages to appear after scrolling to the top
+   * of the message list or clicking the prompt to get them from the phone,
+   * before concluding there are none. Defaults to 5000 ms.
+   */
+  olderMessagesWaitMs?: number;
 }
 
 /**
@@ -24,6 +30,7 @@ export function createWhatsAppWebPage(doc: Document, options: WhatsAppWebPageOpt
   const today = options.today ?? (() => new Date());
   const locale = options.locale ?? doc.defaultView?.navigator.language ?? 'en';
   const settleMs = options.settleMs ?? 300;
+  const olderMessagesWaitMs = options.olderMessagesWaitMs ?? 5000;
   return {
     chatName() {
       const header = find(doc, selectors.chatHeader, 'the Chat header');
@@ -70,7 +77,58 @@ export function createWhatsAppWebPage(doc: Document, options: WhatsAppWebPageOpt
       }
       return items;
     },
+    async loadOlder() {
+      const scroller = messageScroller(doc);
+      const view = doc.defaultView!;
+      const oldestBefore = oldestMessage(doc);
+      const olderArrived = () => oldestMessage(doc) !== oldestBefore;
+      const waitForOlder = async () => {
+        if (!(await waitFor(view, olderArrived, olderMessagesWaitMs))) return false;
+        await settle(view, scroller, settleMs);
+        return true;
+      };
+      // WhatsApp Web loads older messages on its own when scrolled to the top.
+      scroller.scrollTop = 0;
+      if (await waitForOlder()) return 'loaded';
+      // Beyond what it keeps, it asks to get older messages from the phone.
+      const prompt = olderMessagesPrompt(doc);
+      if (!prompt) return 'no-older-messages';
+      prompt.click();
+      return (await waitForOlder()) ? 'loaded' : 'no-older-messages';
+    },
   };
+}
+
+/**
+ * The oldest message loaded (its `data-id`, which names it). WhatsApp Web may
+ * unload newer messages as it loads older ones, so a new oldest message, not
+ * the list's height, tells that older ones arrived.
+ */
+function oldestMessage(doc: Document): string | undefined {
+  const list = find(doc, selectors.messageList, 'the message list');
+  return list.querySelector(selectors.message)?.getAttribute('data-id') ?? undefined;
+}
+
+/** Polls `condition` each frame for up to `waitMs`; resolves whether it became true. */
+async function waitFor(view: Window, condition: () => boolean, waitMs: number): Promise<boolean> {
+  const deadline = view.performance.now() + waitMs;
+  for (;;) {
+    await new Promise((resolve) => view.requestAnimationFrame(() => view.setTimeout(resolve, 10)));
+    if (condition()) return true;
+    if (view.performance.now() >= deadline) return false;
+  }
+}
+
+/** WhatsApp Web's "get older messages from your phone" prompt, if it shows one. */
+function olderMessagesPrompt(doc: Document): HTMLElement | undefined {
+  const list = find(doc, selectors.messageList, 'the message list');
+  for (const row of list.querySelectorAll(selectors.messageListRow)) {
+    if (row.querySelector(selectors.message)) continue;
+    for (const button of row.querySelectorAll<HTMLElement>(selectors.rowButton)) {
+      if (olderMessagesPromptText.test(button.textContent ?? '')) return button;
+    }
+  }
+  return undefined;
 }
 
 /** Resolves once the list has been painted and its height has stopped changing. */

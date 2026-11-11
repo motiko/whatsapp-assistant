@@ -21,16 +21,22 @@ export const fakeDividerHeight = 40;
  * below it), so a recorder must scroll and re-read to see the whole Chat.
  * When scrolled to the very top it loads `olderMessages` above, all at once,
  * keeping the same rows on screen (so every content position shifts down).
+ * `olderMessagesOnPhone` load the same way, but only through `loadOlder`
+ * (like WhatsApp Web's "get older messages from your phone" prompt, which
+ * scrolling alone doesn't click). Nothing older than those can be loaded:
+ * the earliest of them, or of `chat`, is the earliest loadable day.
  */
 export function createFakeWhatsAppPage(options: {
   chatName: string;
   chatArea: Rect;
   chat?: FakeChatDay[];
   olderMessages?: FakeChatDay[];
+  olderMessagesOnPhone?: FakeChatDay[];
 }): WhatsAppPage {
   let items: ChatItem[] = [];
   let scrollHeight = 0;
   let olderMessages = options.olderMessages ?? [];
+  let olderMessagesOnPhone = options.olderMessagesOnPhone ?? [];
   const lay = (chat: FakeChatDay[]) => {
     items = [];
     let y = 0;
@@ -48,6 +54,22 @@ export function createFakeWhatsAppPage(options: {
   lay(chat);
   const maxScrollTop = () => scrollHeight - options.chatArea.height;
   let scrollTop = maxScrollTop();
+  /** Adds `older` above the loaded Chat, keeping the same rows on screen. */
+  const prepend = (older: FakeChatDay[]) => {
+    const heightBefore = scrollHeight;
+    chat = [...older, ...chat];
+    lay(chat);
+    scrollTop += scrollHeight - heightBefore;
+  };
+  const scrollTo = (top: number) => {
+    scrollTop = Math.min(Math.max(Math.round(top), 0), maxScrollTop());
+    if (scrollTop === 0 && olderMessages.length > 0) {
+      prepend(olderMessages);
+      olderMessages = [];
+      return true;
+    }
+    return false;
+  };
 
   return {
     chatName: () => options.chatName,
@@ -55,14 +77,14 @@ export function createFakeWhatsAppPage(options: {
     scrollTop: () => scrollTop,
     scrollHeight: () => scrollHeight,
     async scrollTo(top) {
-      scrollTop = Math.min(Math.max(Math.round(top), 0), maxScrollTop());
-      if (scrollTop === 0 && olderMessages.length > 0) {
-        const heightBefore = scrollHeight;
-        chat = [...olderMessages, ...chat];
-        olderMessages = [];
-        lay(chat);
-        scrollTop += scrollHeight - heightBefore;
-      }
+      scrollTo(top);
+    },
+    async loadOlder() {
+      if (scrollTo(0)) return 'loaded';
+      if (olderMessagesOnPhone.length === 0) return 'no-older-messages';
+      prepend(olderMessagesOnPhone);
+      olderMessagesOnPhone = [];
+      return 'loaded';
     },
     loadedItems() {
       const from = scrollTop - options.chatArea.height;

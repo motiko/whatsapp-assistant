@@ -19,4 +19,17 @@ export const selectors = {
   messageListRow: '[role="row"]',
   /** Present inside a row that is a message (its id names the Chat and the message). */
   message: '[data-id]',
+  /**
+   * Clickable elements in a message-list row that is not a message; one whose
+   * text matches `olderMessagesPromptText` is the prompt to get older
+   * messages from the phone. (Unverified against the real page.)
+   */
+  rowButton: '[role="button"], button',
 } as const;
+
+/**
+ * The text of WhatsApp Web's prompt at the top of the message list, "Click
+ * here to get older messages from your phone." Matched by text because the
+ * row has no stable attribute we know of; English only for now.
+ */
+export const olderMessagesPromptText = /older messages/i;
