@@ -783,6 +783,86 @@ describe('one Chat Record at a time', () => {
   });
 });
 
+describe('the Camera of one Chat Record', () => {
+  /** Logs when the Camera is started, captures and is stopped, and when the page is scrolled. */
+  function logged(chat = sixDays, camera: Partial<Camera> & { failsAfter?: number } = {}) {
+    const log: string[] = [];
+    const fake = createFakeWhatsAppPage({ chatName: 'Alice', chatArea, chat });
+    const page: WhatsAppPage = {
+      ...fake,
+      async scrollTo(top) {
+        log.push('scroll');
+        await fake.scrollTo(top);
+      },
+    };
+    const inner = createFakeCamera({ viewport, page: fake, ...(camera.failsAfter !== undefined ? { fails: new Error('Debugger detached'), failsAfter: camera.failsAfter } : {}) });
+    const recorderCamera: Camera = {
+      async start() {
+        log.push('start');
+        await camera.start?.();
+      },
+      async capture() {
+        log.push('capture');
+        return inner.capture();
+      },
+      async stop() {
+        log.push('stop');
+      },
+    };
+    return { log, recorder: createChatRecorder({ page, camera: recorderCamera }) };
+  }
+  const range = { kind: 'date-range', from: '2026-11-02', to: '2026-11-04' } as const;
+  const once = (log: string[], entry: string) => log.filter((e) => e === entry).length;
+
+  test('is started once before WhatsApp Web is touched and stopped once when the record is made', async () => {
+    const { log, recorder } = logged();
+
+    const outcome = await recorder.record(range);
+
+    expect(outcome.kind).toBe('record');
+    expect(log[0]).toBe('start');
+    expect(log.at(-1)).toBe('stop');
+    expect(once(log, 'start')).toBe(1);
+    expect(once(log, 'stop')).toBe(1);
+    expect(once(log, 'capture')).toBeGreaterThan(1);
+  });
+
+  test('is stopped once when capture stops working part-way, and the Partial Chat Record is kept', async () => {
+    const { log, recorder } = logged(sixDays, { failsAfter: 1 });
+
+    const outcome = await recorder.record(range);
+
+    expect(outcome).toMatchObject({ kind: 'partial', detail: 'Debugger detached' });
+    expect(log.at(-1)).toBe('stop');
+    expect(once(log, 'stop')).toBe(1);
+  });
+
+  test('is stopped once when the record is cancelled', async () => {
+    const { log, recorder } = logged();
+    const cancel = new AbortController();
+
+    const outcome = await recorder.record(range, {
+      signal: cancel.signal,
+      onProgress: () => cancel.abort(),
+    });
+
+    expect(outcome).toEqual({ kind: 'cancelled' });
+    expect(log.at(-1)).toBe('stop');
+    expect(once(log, 'stop')).toBe(1);
+  });
+
+  test('that cannot start fails the record before WhatsApp Web is touched', async () => {
+    const { log, recorder } = logged(sixDays, {
+      start: () => Promise.reject(new CaptureNotAllowedError('Cannot attach to this tab')),
+    });
+
+    const outcome = await recorder.record(range);
+
+    expect(outcome).toEqual({ kind: 'failed', reason: 'capture-not-allowed', detail: 'Cannot attach to this tab' });
+    expect(log).toEqual(['start']);
+  });
+});
+
 describe('a Chat Record that fails part-way', () => {
   // The first screen of 2-4 Nov shows Chat positions 540-1218: 2 Nov (540-1080)
   // and 3 Nov's divider and first message (1080-1220), cut off at 1218. So the

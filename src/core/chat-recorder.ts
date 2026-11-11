@@ -183,7 +183,11 @@ async function recordOnce(deps: Deps, request: ChatRecordRequest, options: Recor
     },
     cancelled: () => signal?.aborted ?? false,
   };
+  let started = false;
   try {
+    run.checkpoint();
+    await run.camera.start?.();
+    started = true;
     run.checkpoint();
     const outcome =
       request.kind === 'visible'
@@ -196,6 +200,8 @@ async function recordOnce(deps: Deps, request: ChatRecordRequest, options: Recor
   } catch (error) {
     if (error instanceof Cancelled || signal?.aborted) return { kind: 'cancelled' };
     return { kind: 'failed', reason: failureReason(error), detail: errorMessage(error) };
+  } finally {
+    if (started) await run.camera.stop?.().catch(() => {});
   }
 }
 
