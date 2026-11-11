@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from 'vitest';
-import type { RecordProgress } from '../core/chat-recorder';
-import { createRecordPanel, type CreateResult } from './record-panel';
+import type { ContinuationPoint, RecordProgress } from '../core/chat-recorder';
+import type { ContinuationStore } from '../extension/continuation-store';
+import { createRecordPanel, type CreateResult, type PanelRequest, type RecordFile } from './record-panel';
 
 afterEach(() => {
   document.body.replaceChildren();
@@ -8,22 +9,37 @@ afterEach(() => {
 
 /** What the panel was given for the Chat Record it started. */
 interface StartedRun {
+  request: PanelRequest;
   onProgress: (progress: RecordProgress) => void;
   signal: AbortSignal;
   finish: (result: CreateResult) => void;
 }
 
-function render() {
+/** Pending Continuations kept in memory, as `chrome.storage.session` would keep them. */
+function memoryStore(points: ContinuationPoint[] = []) {
+  const pending = new Map(points.map((point) => [point.chatName, point]));
+  const store: ContinuationStore = {
+    pending: async (chatName) => pending.get(chatName),
+    save: async (point) => void pending.set(point.chatName, point),
+    clear: async (chatName) => void pending.delete(chatName),
+  };
+  return { store, pending };
+}
+
+function render(options: { pending?: ContinuationPoint[] } = {}) {
   // Stands in for WhatsApp Web's page under the panel.
   const whatsApp = document.createElement('main');
   whatsApp.style.cssText = 'position: fixed; inset: 0;';
   document.body.append(whatsApp);
   const runs: StartedRun[] = [];
+  const downloads: RecordFile[] = [];
+  const continuations = memoryStore(options.pending);
   const panel = createRecordPanel(document, {
     chatName: () => 'Alice',
-    createChatRecord: (_range, run) =>
-      new Promise<CreateResult>((resolve) => runs.push({ ...run, finish: resolve })),
-    download: () => {},
+    createChatRecord: (request, run) =>
+      new Promise<CreateResult>((resolve) => runs.push({ request, ...run, finish: resolve })),
+    download: (file) => void downloads.push(file),
+    continuations: continuations.store,
   });
   document.body.append(panel.button);
   const root = document.querySelector('whatsapp-assistant-panel')!.shadowRoot!;
@@ -40,7 +56,7 @@ function render() {
     return runs.at(-1)!;
   };
   const settle = () => new Promise((resolve) => setTimeout(resolve));
-  return { panel, root, runs, button, status, whatsAppGetsClicks, visible, start, settle };
+  return { panel, root, runs, downloads, continuations: continuations.pending, button, status, whatsAppGetsClicks, visible, start, settle };
 }
 
 describe('the panel while a Chat Record is being made', () => {
@@ -146,5 +162,143 @@ describe('the extension UI in captured pixels', () => {
     panel.hide();
 
     expect(whatsAppGetsClicks()).toBe(false);
+  });
+});
+
+describe('Partial Chat Records and Continue in the panel', () => {
+  const point: ContinuationPoint = {
+    chatName: 'Alice',
+    request: { kind: 'date-range', from: '2026-01-01', to: '2026-03-31' },
+    lastMessage: { id: 'm-1', day: '2026-03-14', time: '14:32' },
+    reason: 'capture-failed',
+    partialFileName: 'Chat history - Alice - 2026-01-01 to 2026-03-14 (partial).png',
+  };
+  const day = (year: number, month: number, date: number) =>
+    new Date(year, month - 1, date).toLocaleDateString(undefined, { dateStyle: 'medium' });
+  const continueLabel = `Continue from ${day(2026, 3, 14)} 14:32`;
+  const png = (name: string): RecordFile => ({ name, image: new Blob([], { type: 'image/png' }) });
+  const pdf = (name: string): RecordFile => ({ name, image: new Blob([], { type: 'application/pdf' }) });
+  const partialOf = (continuation: ContinuationPoint) => ({ continuation, reason: 'capture-failed' as const, detail: 'Tab is hidden' });
+  /** Whether the panel shows any Continue button. */
+  const offersContinue = (root: ShadowRoot) =>
+    Array.from(root.querySelectorAll('button')).some((b) => b.textContent?.startsWith('Continue from') && b.checkVisibility());
+
+  test('offers no Continue when no Continuation is pending for the open Chat', async () => {
+    const { panel, root, settle } = render({ pending: [{ ...point, chatName: 'Bob' }] });
+
+    panel.open();
+    await settle();
+
+    expect(offersContinue(root)).toBe(false);
+  });
+
+  test('offers Continue from the last message captured when a Continuation is pending for the open Chat, and runs it', async () => {
+    const { panel, button, runs, settle } = render({ pending: [point] });
+
+    panel.open();
+    await settle();
+    button(continueLabel)!.click();
+    button('Create Chat Record')!.click();
+
+    expect(runs.at(-1)!.request).toEqual({ kind: 'continuation', from: point });
+  });
+
+  test('goes back to a Date Range when a preset is chosen after Continue', async () => {
+    const { panel, button, runs, settle } = render({ pending: [point] });
+    panel.open();
+    await settle();
+
+    button(continueLabel)!.click();
+    button('Today')!.click();
+    button('Create Chat Record')!.click();
+
+    expect(runs.at(-1)!.request.kind).toBe('date-range');
+  });
+
+  test('confirms a partial save to the clipboard, offers its Download, and then offers Continue', async () => {
+    const { start, status, button, continuations, settle } = render();
+    const run = start();
+
+    run.finish({
+      kind: 'made',
+      file: png(point.partialFileName),
+      clipboard: { copied: true },
+      partial: partialOf(point),
+    });
+    await settle();
+
+    expect(status()).toBe(
+      `The run failed part-way (the screen couldn't be captured: Tab is hidden). What was captured, up to ${day(2026, 3, 14)} 14:32, was copied to the clipboard as a partial Chat Record. Click “${continueLabel}” to record the rest.`,
+    );
+    expect(button('Download PNG')!.checkVisibility()).toBe(true);
+    expect(continuations.get('Alice')).toEqual(point);
+    expect(button(continueLabel)?.checkVisibility()).toBe(true);
+  });
+
+  test('downloads a partial PDF straight away and confirms it', async () => {
+    const { start, status, downloads, settle } = render();
+    const run = start();
+    const name = 'Chat history - Alice - 2026-01-01 to 2026-03-14 (partial).pdf';
+
+    run.finish({ kind: 'made-pdf', file: pdf(name), partial: partialOf({ ...point, partialFileName: name }) });
+    await settle();
+
+    expect(downloads.map((file) => file.name)).toEqual([name]);
+    expect(status()).toContain(`was downloaded to your Downloads folder as a partial Chat Record, “${name}”`);
+  });
+
+  test('forgets the Continuation once it has finished, and downloads and confirms a Gap Record', async () => {
+    const { panel, button, runs, status, downloads, continuations, root, settle } = render({ pending: [point] });
+    panel.open();
+    await settle();
+    button(continueLabel)!.click();
+    button('Create Chat Record')!.click();
+    const gapName = 'Chat history - Alice - 2026-03-14 (gap).png';
+
+    runs.at(-1)!.finish({
+      kind: 'made',
+      file: png('Chat history - Alice - 2026-03-14 to 2026-03-31.png'),
+      clipboard: { copied: true },
+      gap: { kind: 'record', file: png(gapName) },
+    });
+    await settle();
+
+    expect(continuations.has('Alice')).toBe(false);
+    expect(offersContinue(root)).toBe(false);
+    expect(downloads.map((file) => file.name)).toEqual([gapName]);
+    expect(status()).toBe(
+      `Chat Record copied to the clipboard as a PNG. Some messages between it and the partial Chat Record had been missed; they were downloaded separately as “${gapName}”.`,
+    );
+  });
+
+  test('warns when messages missed between the records could not be recorded', async () => {
+    const { start, status, settle } = render();
+    const run = start();
+
+    run.finish({
+      kind: 'made',
+      file: png('Chat history - Alice - 2026-03-14 to 2026-03-31.png'),
+      clipboard: { copied: true },
+      gap: { kind: 'failed', detail: 'Tab is hidden' },
+    });
+    await settle();
+
+    expect(status()).toContain(
+      "Some messages between it and the partial Chat Record were missed and couldn't be recorded (Tab is hidden). Record those days again to have them.",
+    );
+  });
+
+  test('keeps the Continuation when it fails without capturing anything', async () => {
+    const { panel, button, runs, continuations, settle } = render({ pending: [point] });
+    panel.open();
+    await settle();
+    button(continueLabel)!.click();
+    button('Create Chat Record')!.click();
+
+    runs.at(-1)!.finish({ kind: 'failed', reason: 'capture-failed', detail: 'Tab is hidden' });
+    await settle();
+
+    expect(continuations.get('Alice')).toEqual(point);
+    expect(button(continueLabel)?.checkVisibility()).toBe(true);
   });
 });

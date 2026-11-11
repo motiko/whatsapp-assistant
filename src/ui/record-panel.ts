@@ -1,9 +1,20 @@
-import type { ChatRecordRequest, FailureReason, RecordProgress } from '../core/chat-recorder';
+import type { ChatRecordRequest, ContinuationPoint, FailureReason, RecordProgress } from '../core/chat-recorder';
 import type { LocalDay } from '../core/day-span';
+import type { ContinuationStore } from '../extension/continuation-store';
 import { createDateRangeFields, dateRangeFieldsStyles } from './date-range-fields';
 
-/** What the panel asks to record: a Date Range or the Full Chat. */
+/** What the panel asks to record: a Date Range, the Full Chat, or a Continuation. */
 export type PanelRequest = Exclude<ChatRecordRequest, { kind: 'visible' }>;
+
+/** The run failed part-way; the file made is a Partial Chat Record, which `continuation` can continue. */
+export interface PartialSave {
+  continuation: ContinuationPoint;
+  reason: FailureReason;
+  detail: string;
+}
+
+/** Messages a Continuation missed after the Partial Chat Record: their Gap Record, or why it couldn't be made. */
+export type GapSave = { kind: 'record'; file: RecordFile } | { kind: 'failed'; detail: string };
 
 /** A Chat Record ready to save: its PNG or PDF and the file name (`.png` or `.pdf`) to save it under. */
 export interface RecordFile {
@@ -18,9 +29,11 @@ export type CreateResult =
       file: RecordFile;
       /** Whether the Chat Record reached the clipboard, and why not if it didn't. */
       clipboard: { copied: true } | { copied: false; detail: string };
+      partial?: PartialSave;
+      gap?: GapSave;
     }
   /** A Chat Record too long for one image: a PDF, which the panel downloads straight away. */
-  | { kind: 'made-pdf'; file: RecordFile }
+  | { kind: 'made-pdf'; file: RecordFile; partial?: PartialSave; gap?: GapSave }
   /** The chosen Date Range has no messages; nothing was made. */
   | { kind: 'no-messages'; from: LocalDay; to: LocalDay }
   /** A Full Chat was asked for, but the Chat has no messages; nothing was made. */
@@ -65,6 +78,8 @@ export function createRecordPanel(
     createChatRecord: (request: PanelRequest, run: RunControls) => Promise<CreateResult>;
     /** Saves the file to the Downloads folder; throws if it can't. */
     download: (file: RecordFile) => void;
+    /** Where Partial Chat Records are kept track of, so the panel can offer to continue them. */
+    continuations: ContinuationStore;
   },
 ): RecordPanel {
   const buttonHost = doc.createElement('whatsapp-assistant-button');
@@ -80,6 +95,8 @@ export function createRecordPanel(
     <section role="dialog" aria-labelledby="title" hidden>
       <header><h2 id="title">Chat Record</h2><button type="button" class="close" aria-label="Close">×</button></header>
       <p class="chat">Chat: <strong></strong></p>
+      <button type="button" class="continue" aria-pressed="false" hidden></button>
+      <p class="continue-note" hidden></p>
       <div class="range"></div>
       <p class="hint">Copies the messages of these days to the clipboard as an image, with a band above them naming the Chat, the days and when it was taken. More than about ten screens of messages download as a PDF instead. Keep this tab visible and leave it alone until it's done.</p>
       <button type="button" class="create">Create Chat Record</button>
@@ -97,15 +114,49 @@ export function createRecordPanel(
   const cancelButton = panelRoot.querySelector<HTMLButtonElement>('.cancel')!;
   const notice = panelRoot.querySelector<HTMLElement>('.notice')!;
   const lock = panelRoot.querySelector<HTMLElement>('.lock')!;
+  const continueButton = panelRoot.querySelector<HTMLButtonElement>('.continue')!;
+  const continueNote = panelRoot.querySelector<HTMLElement>('.continue-note')!;
   /** The Chat Record being made, if any. */
   let running: AbortController | undefined;
   const busy = () => running !== undefined;
+  /** The Continuation pending for the open Chat, if any, and whether Continue is chosen. */
+  let pending: ContinuationPoint | undefined;
+  let continuing = false;
   const updateCreateButton = () => {
-    createButton.disabled = busy() || 'error' in dateRange.value();
+    createButton.disabled = busy() || (!continuing && 'error' in dateRange.value());
+  };
+  const chooseContinue = (on: boolean) => {
+    continuing = on && pending !== undefined;
+    continueButton.setAttribute('aria-pressed', String(continuing));
+    continueNote.hidden = !continuing;
+    updateCreateButton();
+  };
+  /** Shows Continue for `point`, or hides it. */
+  const offerContinue = (point: ContinuationPoint | undefined) => {
+    pending = point;
+    continueButton.hidden = point === undefined;
+    if (point) {
+      continueButton.textContent = `Continue from ${describeMessage(point.lastMessage)}`;
+      continueNote.textContent = `Records the rest of ${describeRequest(point.request)}, from right after the last message of “${point.partialFileName}”.`;
+    }
+    chooseContinue(false);
   };
   const dateRange = createDateRangeFields(panelRoot.querySelector<HTMLElement>('.range')!, {
-    onChange: updateCreateButton,
+    onChange: () => chooseContinue(false),
   });
+  /** Counts panel openings, so a slow look-up for an earlier one is ignored. */
+  let opened = 0;
+  const lookUpContinuation = (chatName: string | undefined) => {
+    const look = ++opened;
+    offerContinue(undefined);
+    if (chatName === undefined) return;
+    options.continuations
+      .pending(chatName)
+      .then((point) => {
+        if (look === opened && !busy()) offerContinue(point);
+      })
+      .catch(() => {});
+  };
   doc.body.append(panelHost);
 
   /** The Chat Record last made, kept in memory only while the panel offers to download it. */
@@ -122,7 +173,9 @@ export function createRecordPanel(
     position();
     // Opened again while a Chat Record is being made: keep showing its progress.
     if (busy()) return;
-    chatLabel.textContent = options.chatName() ?? 'unknown';
+    const chatName = options.chatName();
+    chatLabel.textContent = chatName ?? 'unknown';
+    lookUpContinuation(chatName);
     status.textContent = '';
     status.className = 'status';
     offerDownload(undefined);
@@ -164,10 +217,15 @@ export function createRecordPanel(
     if (!dialog.hidden && !path.includes(panelHost) && !path.includes(buttonHost)) close();
   });
 
+  continueButton.addEventListener('click', () => chooseContinue(!continuing));
+
   createButton.addEventListener('click', () => {
     const chosen = dateRange.value();
-    if ('error' in chosen || busy()) return;
-    const request: PanelRequest = 'fullChat' in chosen ? { kind: 'full-chat' } : { kind: 'date-range', ...chosen.range };
+    if (busy()) return;
+    let request: PanelRequest;
+    if (continuing && pending) request = { kind: 'continuation', from: pending };
+    else if ('error' in chosen) return;
+    else request = 'fullChat' in chosen ? { kind: 'full-chat' } : { kind: 'date-range', ...chosen.range };
     const controller = new AbortController();
     running = controller;
     showRunning(true);
@@ -196,13 +254,27 @@ export function createRecordPanel(
           show('This Chat has no messages WhatsApp Web can load. Nothing was copied.', 'error');
           return;
         }
+        const { partial, gap } = result;
+        if (partial) void options.continuations.save(partial.continuation).catch(() => {});
+        else if (request.kind === 'continuation') void options.continuations.clear(request.from.chatName).catch(() => {});
+        offerContinue(partial?.continuation);
+        let saved: { text: string; ok: boolean };
         if (result.kind === 'made-pdf') {
-          downloadPdf(result.file);
-          return;
+          saved = downloadPdf(result.file, partial);
+        } else {
+          offerDownload(result.file);
+          saved = result.clipboard.copied
+            ? { text: partial ? partialCopiedText(partial) : 'Chat Record copied to the clipboard as a PNG.', ok: true }
+            : {
+                text: `The ${partial ? 'partial ' : ''}Chat Record couldn't be copied to the clipboard (${result.clipboard.detail}). You can download it instead.`,
+                ok: false,
+              };
         }
-        offerDownload(result.file);
-        if (result.clipboard.copied) show('Chat Record copied to the clipboard as a PNG.', 'done');
-        else show(`The Chat Record couldn't be copied to the clipboard (${result.clipboard.detail}). You can download it instead.`, 'error');
+        const gapSaved = gap ? saveGap(gap) : undefined;
+        const text = [saved.text, partial ? `Click “${continueButton.textContent}” to record the rest.` : '', gapSaved?.text ?? '']
+          .filter(Boolean)
+          .join(' ');
+        show(text, saved.ok && !partial && (gapSaved?.ok ?? true) ? 'done' : 'error');
       })
       .catch((error: unknown) => {
         show(`No Chat Record was made (${error instanceof Error ? error.message : String(error)}).`, 'error');
@@ -219,25 +291,41 @@ export function createRecordPanel(
     show('Cancelling…', 'working');
   });
 
-  const download = (file: RecordFile, done: string) => {
+  /** Downloads `file`; what to tell the user, and whether it worked. */
+  const download = (file: RecordFile, done: string, what = 'The Chat Record'): { text: string; ok: boolean } => {
     try {
       options.download(file);
-      show(done, 'done');
-      return true;
+      return { text: done, ok: true };
     } catch (error) {
-      show(`The Chat Record couldn't be downloaded (${error instanceof Error ? error.message : String(error)}).`, 'error');
-      return false;
+      return { text: `${what} couldn't be downloaded (${error instanceof Error ? error.message : String(error)}).`, ok: false };
     }
   };
   /** A PDF is never copied; it is downloaded as soon as it is made (or offered again if that fails). */
-  const downloadPdf = (file: RecordFile) => {
-    const done = `The Chat Record is more than about ten screens long, so it was downloaded as a PDF to your Downloads folder as “${file.name}”.`;
-    offerDownload(download(file, done) ? undefined : file);
+  const downloadPdf = (file: RecordFile, partial: PartialSave | undefined) => {
+    const done = partial
+      ? `${partialStart(partial)} was downloaded to your Downloads folder as a partial Chat Record, “${file.name}” (a PDF, as it is more than about ten screens long).`
+      : `The Chat Record is more than about ten screens long, so it was downloaded as a PDF to your Downloads folder as “${file.name}”.`;
+    const saved = download(file, done);
+    offerDownload(saved.ok ? undefined : file);
+    return saved;
   };
+  /** A Gap Record is always downloaded, as a file of its own. */
+  const saveGap = (gap: GapSave) =>
+    gap.kind === 'failed'
+      ? {
+          text: `Some messages between it and the partial Chat Record were missed and couldn't be recorded (${gap.detail}). Record those days again to have them.`,
+          ok: false,
+        }
+      : download(
+          gap.file,
+          `Some messages between it and the partial Chat Record had been missed; they were downloaded separately as “${gap.file.name}”.`,
+          'The Gap Record of messages missed between it and the partial Chat Record',
+        );
 
   downloadButton.addEventListener('click', () => {
     if (!lastRecord) return;
-    download(lastRecord, `Chat Record downloaded to your Downloads folder as “${lastRecord.name}”.`);
+    const saved = download(lastRecord, `Chat Record downloaded to your Downloads folder as “${lastRecord.name}”.`);
+    show(saved.text, saved.ok ? 'done' : 'error');
   });
 
   return {
@@ -254,6 +342,38 @@ export function createRecordPanel(
       };
     },
   };
+}
+
+/** "The run failed part-way (…). What was captured, up to 14 Mar 2026 14:32," */
+function partialStart({ continuation, reason, detail }: PartialSave): string {
+  return `The run failed part-way (${partialReason(reason, detail)}). What was captured, up to ${describeMessage(continuation.lastMessage)},`;
+}
+
+function partialCopiedText(partial: PartialSave): string {
+  return `${partialStart(partial)} was copied to the clipboard as a partial Chat Record.`;
+}
+
+function partialReason(reason: FailureReason, detail: string): string {
+  switch (reason) {
+    case 'page-not-recognised':
+      return "WhatsApp Web's page wasn't recognised";
+    case 'capture-not-allowed':
+      return "Chrome didn't allow capturing this tab";
+    default:
+      return `the screen couldn't be captured: ${detail}`;
+  }
+}
+
+/** "14 Mar 2026 14:32", or just the day when the time isn't known. */
+function describeMessage(message: ContinuationPoint['lastMessage']): string {
+  return message.time ? `${formatDay(message.day)} ${message.time}` : formatDay(message.day);
+}
+
+function describeRequest(request: ContinuationPoint['request']): string {
+  if (request.kind === 'full-chat') return 'the Full Chat';
+  return request.from === request.to
+    ? formatDay(request.from)
+    : `${formatDay(request.from)} to ${formatDay(request.to)}`;
 }
 
 function progressText({ screensCaptured, reachedDay }: RecordProgress): string {
@@ -321,6 +441,11 @@ const panelStyles = `
     background: transparent; color: inherit; font: inherit; font-weight: 600; cursor: pointer; }
   .cancel:disabled { opacity: .6; cursor: progress; }
   .cancel[hidden], .notice[hidden], .lock[hidden] { display: none; }
+  .continue { width: 100%; margin: 4px 0; padding: 6px 12px; border: 1px dashed #00a884; border-radius: 14px;
+    background: transparent; color: inherit; font: inherit; font-size: 13px; cursor: pointer; }
+  .continue[aria-pressed="true"] { border-style: solid; background: rgba(0, 168, 132, .12); }
+  .continue[hidden], .continue-note[hidden] { display: none; }
+  .continue-note { font-size: 12.5px; }
   .notice { padding: 8px 10px; border-radius: 6px; background: #fff4ce; color: #5c4400; font-size: 13px; }
   :host-context(body.dark) .notice { background: #4a3c00; color: #ffe8a3; }
   .close:disabled { opacity: .4; cursor: not-allowed; }
