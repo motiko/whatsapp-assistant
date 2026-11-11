@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import { CaptureNotAllowedError, type Camera } from './camera';
-import { createChatRecorder, type ChatRecordOutcome } from './chat-recorder';
+import { createChatRecorder, type ChatRecord, type ChatRecordOutcome } from './chat-recorder';
 import { drawContextBand } from './context-band';
 import { PageNotRecognisedError, type ChatItem, type WhatsAppPage } from './whatsapp-page';
 import { createFakeCamera, readScreenPositions } from './testing/fake-camera';
@@ -170,11 +170,11 @@ function recorderFor(chat: FakeChatDay[], options: { devicePixelRatio?: number }
  * The WhatsApp pixels of a recorded image: everything below its Context Band,
  * with row 0 the first row under the band.
  */
-async function recordedImage(outcome: ChatRecordOutcome, devicePixelRatio = 1) {
-  expect(outcome.kind).toBe('record');
-  if (outcome.kind !== 'record') throw new Error('no record');
-  const image = await readScreenPositions(outcome.record.image);
-  const band = drawContextBand(outcome.record.contextBand, image.width, devicePixelRatio).height;
+async function recordedImage(made: ChatRecordOutcome | ChatRecord | undefined, devicePixelRatio = 1) {
+  const record = made && 'kind' in made ? ('record' in made ? made.record : undefined) : made;
+  if (!record) throw new Error(`no record: ${made && 'kind' in made ? JSON.stringify(made) : 'none'}`);
+  const image = await readScreenPositions(record.image);
+  const band = drawContextBand(record.contextBand, image.width, devicePixelRatio).height;
   expect(band).toBeGreaterThan(0);
   expect(image.height).toBeGreaterThan(band);
   return {
@@ -543,9 +543,9 @@ describe('a Chat Record that cannot be made', () => {
     expect(outcome).toMatchObject({ kind: 'failed', reason: 'page-not-recognised' });
   });
 
-  test('fails, producing nothing, when the screen cannot be captured part-way through a Date Range', async () => {
+  test('fails, producing nothing, when the first screen of a Date Range cannot be captured', async () => {
     const page = createFakeWhatsAppPage({ chatName: 'Alice', chatArea, chat: sixDays });
-    const camera = createFakeCamera({ viewport, page, fails: new Error('Tab is hidden'), failsAfter: 1 });
+    const camera = createFakeCamera({ viewport, page, fails: new Error('Tab is hidden') });
     const recorder = createChatRecorder({ page, camera });
 
     const outcome = await recorder.record({ kind: 'date-range', from: '2026-11-02', to: '2026-11-04' });
@@ -782,7 +782,80 @@ describe('one Chat Record at a time', () => {
 });
 
 describe('a Chat Record that fails part-way', () => {
-  test('fails with "page not recognised", producing nothing, when WhatsApp Web changes mid-walk', async () => {
+  // The first screen of 2-4 Nov shows Chat positions 540-1218: 2 Nov (540-1080)
+  // and 3 Nov's divider and first message (1080-1220), cut off at 1218. So the
+  // last complete message is 2 Nov's fifth (980-1080).
+  const range = { kind: 'date-range', from: '2026-11-02', to: '2026-11-04' } as const;
+
+  function recorderFailingAfter(screens: number, chat = sixDays) {
+    const page = createFakeWhatsAppPage({ chatName: 'Alice', chatArea, chat });
+    const camera = createFakeCamera({ viewport, page, fails: new Error('Tab is hidden'), failsAfter: screens });
+    return createChatRecorder({ page, camera, clock: () => new Date('2026-11-11T13:32:05Z') });
+  }
+
+  test('keeps what was captured as a Partial Chat Record, up to the last complete message', async () => {
+    const recorder = recorderFailingAfter(1);
+
+    const outcome = await recorder.record(range);
+
+    expect(outcome).toMatchObject({
+      kind: 'partial',
+      reason: 'capture-failed',
+      detail: 'Tab is hidden',
+      record: {
+        format: 'png',
+        span: { from: '2026-11-02', to: '2026-11-02' },
+        fileName: 'Chat history - Alice - 2026-11-02 (partial).png',
+        contextBand: [
+          'Chat: Alice',
+          'Messages: 2026-11-02',
+          'Taken: 2026-11-11 14:32 (UTC+01:00)',
+          'Partial: stopped after 2026-11-02 08:05, run failed: Tab is hidden',
+        ],
+      },
+    });
+    const image = await recordedImage(outcome);
+    expect(image.height).toBe(540);
+    for (let row = 0; row < image.height; row++) {
+      expect(image.at(0, row)).toEqual({ x: 400, y: 540 + row });
+    }
+  });
+
+  test('says where to continue: the Chat, the request, and the last message captured, by id, day and time', async () => {
+    const recorder = recorderFailingAfter(1);
+
+    const outcome = await recorder.record(range);
+
+    expect(outcome).toMatchObject({
+      kind: 'partial',
+      continuation: {
+        chatName: 'Alice',
+        request: range,
+        lastMessage: { id: '2026-11-02 #5', day: '2026-11-02', time: '08:05' },
+        reason: 'capture-failed',
+        partialFileName: 'Chat history - Alice - 2026-11-02 (partial).png',
+      },
+    });
+  });
+
+  test('ends on the last day actually captured, across days', async () => {
+    const recorder = recorderFailingAfter(2);
+
+    const outcome = await recorder.record(range);
+
+    // The second screen reaches 1888: 3 Nov's last message ends at 1620, 4 Nov's
+    // divider and first two messages at 1860.
+    expect(outcome).toMatchObject({
+      kind: 'partial',
+      record: { span: { from: '2026-11-02', to: '2026-11-04' }, fileName: 'Chat history - Alice - 2026-11-02 to 2026-11-04 (partial).png' },
+      continuation: { lastMessage: { id: '2026-11-04 #2', day: '2026-11-04', time: '08:02' } },
+    });
+    const image = await recordedImage(outcome);
+    expect(image.height).toBe(1320);
+    for (let row = 0; row < image.height; row++) expect(image.at(0, row).y).toBe(540 + row);
+  });
+
+  test('keeps a Partial Chat Record when WhatsApp Web changes mid-walk ("page not recognised")', async () => {
     const fake = createFakeWhatsAppPage({ chatName: 'Alice', chatArea, chat: sixDays });
     let screens = 0;
     const page: WhatsAppPage = {
@@ -794,19 +867,22 @@ describe('a Chat Record that fails part-way', () => {
     };
     const recorder = createChatRecorder({ page, camera: createFakeCamera({ viewport, page }) });
 
-    const outcome = await recorder.record(
-      { kind: 'date-range', from: '2026-11-02', to: '2026-11-04' },
-      { onProgress: (p) => (screens = p.screensCaptured) },
-    );
+    const outcome = await recorder.record(range, { onProgress: (p) => (screens = p.screensCaptured) });
 
-    expect(outcome).toEqual({
-      kind: 'failed',
+    expect(outcome).toMatchObject({
+      kind: 'partial',
       reason: 'page-not-recognised',
       detail: "WhatsApp Web's page was not recognised: no message list",
+      record: { span: { from: '2026-11-02', to: '2026-11-02' } },
+      continuation: { lastMessage: { id: '2026-11-02 #5' }, reason: 'page-not-recognised' },
     });
+    if (outcome.kind !== 'partial') return;
+    expect(outcome.record.contextBand.at(-1)).toBe(
+      "Partial: stopped after 2026-11-02 08:05, run failed: WhatsApp Web's page was not recognised: no message list",
+    );
   });
 
-  test('fails, producing nothing, when WhatsApp Web no longer shows any row already captured', async () => {
+  test('keeps a Partial Chat Record when WhatsApp Web no longer shows any row already captured (a scrolling problem)', async () => {
     const fake = createFakeWhatsAppPage({ chatName: 'Alice', chatArea, chat: sixDays });
     // After the first screen, WhatsApp Web reports only rows it had not
     // reported before, so nothing captured can tell where the record continues.
@@ -823,31 +899,92 @@ describe('a Chat Record that fails part-way', () => {
     };
     const recorder = createChatRecorder({ page, camera: createFakeCamera({ viewport, page: fake }) });
 
-    const outcome = await recorder.record(
-      { kind: 'date-range', from: '2026-11-02', to: '2026-11-04' },
-      { onProgress: (p) => (screens = p.screensCaptured) },
-    );
+    const outcome = await recorder.record(range, { onProgress: (p) => (screens = p.screensCaptured) });
 
-    expect(outcome).toEqual({
-      kind: 'failed',
+    expect(outcome).toMatchObject({
+      kind: 'partial',
       reason: 'capture-failed',
       detail: 'WhatsApp Web no longer shows any part of the Chat Record captured so far',
+      continuation: { lastMessage: { id: '2026-11-02 #5' } },
+    });
+    expect((await recordedImage(outcome)).height).toBe(540);
+  });
+
+  test('fails, producing nothing, when no message was captured in full before the failure', async () => {
+    // 2 Nov: a divider and one 700px message, taller than the first screen.
+    const chat = [sixDays[0]!, { day: '2026-11-02', messageHeights: [700] }, sixDays[2]!];
+    const recorder = recorderFailingAfter(1, chat);
+
+    const outcome = await recorder.record(range);
+
+    expect(outcome).toEqual({ kind: 'failed', reason: 'capture-failed', detail: 'Tab is hidden' });
+  });
+
+  test('of a Full Chat is marked partial and still states the earliest day', async () => {
+    const recorder = recorderFailingAfter(1);
+
+    const outcome = await recorder.record({ kind: 'full-chat' });
+
+    // The first screen is 0-678: 1 Nov (0-540) and 2 Nov's divider and first message (540-680, cut off).
+    expect(outcome).toMatchObject({
+      kind: 'partial',
+      record: {
+        fileName: 'Chat history - Alice - 2026-11-01 (partial).png',
+        contextBand: [
+          'Chat: Alice',
+          'Messages: 2026-11-01',
+          'Taken: 2026-11-11 14:32 (UTC+01:00)',
+          'Full Chat; earliest available 2026-11-01',
+          'Partial: stopped after 2026-11-01 08:05, run failed: Tab is hidden',
+        ],
+      },
+      continuation: { request: { kind: 'full-chat' }, lastMessage: { id: '2026-11-01 #5' } },
     });
   });
 
-  test('stops reporting progress after the Camera fails', async () => {
-    const page = createFakeWhatsAppPage({ chatName: 'Alice', chatArea, chat: sixDays });
-    const camera = createFakeCamera({ viewport, page, fails: new Error('Tab is hidden'), failsAfter: 1 });
+  test('is a PDF when what was captured is taller than ten chat areas', async () => {
+    const page = createFakeWhatsAppPage({ chatName: 'Alice', chatArea: smallChatArea, chat: twoHundredPixelDays(8) });
+    const camera = createFakeCamera({ viewport: smallViewport, page, fails: new Error('Tab is hidden'), failsAfter: 13 });
     const recorder = createChatRecorder({ page, camera });
+
+    const outcome = await recorder.record({ kind: 'date-range', from: '2026-11-01', to: '2026-11-08' });
+
+    // Thirteen screens of a 100px chat area (each after the first adds 92px,
+    // the rest overlapping) reach row 1204; 6 Nov's last message ends at 1200.
+    expect(outcome).toMatchObject({
+      kind: 'partial',
+      record: { format: 'pdf', fileName: 'Chat history - Alice - 2026-11-01 to 2026-11-06 (partial).pdf' },
+      continuation: { lastMessage: { id: '2026-11-06 #4' } },
+    });
+    if (outcome.kind !== 'partial') return;
+    const pages = await readPdfPages(outcome.record.image);
+    const last = pages.at(-1)!;
+    expect(last.at(0, last.height - 1).y).toBe(1199);
+  });
+
+  test('reports no progress after the Camera fails', async () => {
+    const recorder = recorderFailingAfter(1);
     const progress: number[] = [];
 
-    const outcome = await recorder.record(
-      { kind: 'date-range', from: '2026-11-02', to: '2026-11-04' },
-      { onProgress: (p) => progress.push(p.screensCaptured) },
-    );
+    const outcome = await recorder.record(range, { onProgress: (p) => progress.push(p.screensCaptured) });
 
-    expect(outcome).toEqual({ kind: 'failed', reason: 'capture-failed', detail: 'Tab is hidden' });
+    expect(outcome.kind).toBe('partial');
     expect(progress).toEqual([1]);
+  });
+
+  test('cancelled part-way still produces nothing', async () => {
+    const page = createFakeWhatsAppPage({ chatName: 'Alice', chatArea, chat: sixDays });
+    const cancel = new AbortController();
+    // The user cancels, and WhatsApp Web stops responding as the run winds down.
+    const camera = createFakeCamera({ viewport, page, fails: new Error('Tab is hidden'), failsAfter: 1 });
+    const recorder = createChatRecorder({ page, camera });
+
+    const outcome = await recorder.record(range, {
+      signal: cancel.signal,
+      onProgress: ({ screensCaptured }) => screensCaptured === 1 && cancel.abort(),
+    });
+
+    expect(outcome).toEqual({ kind: 'cancelled' });
   });
 });
 

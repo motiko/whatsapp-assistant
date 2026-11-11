@@ -52,8 +52,34 @@ export interface ChatRecord {
   historyIncomplete: boolean;
 }
 
+/** A Date Range or the Full Chat: a request that walks the Chat day by day. */
+export type RangeRequest = Extract<ChatRecordRequest, { kind: 'date-range' | 'full-chat' }>;
+
+/**
+ * Where a Continuation picks up after a Partial Chat Record. Only names and
+ * dates: the Chat, the original request, WhatsApp Web's id of the last
+ * message captured with its day and time, and why the run failed; never
+ * message content or pixels.
+ */
+export interface ContinuationPoint {
+  chatName: string;
+  /** What the failed run was asked to record; a Continuation runs to its end. */
+  request: RangeRequest;
+  /** The last message the Partial Chat Record holds in full. */
+  lastMessage: { id: string; day: LocalDay; time?: string };
+  reason: FailureReason;
+  /** The Partial Chat Record's file name, for the Context Bands of the records that follow it. */
+  partialFileName: string;
+}
+
 export type ChatRecordOutcome =
   | { kind: 'record'; record: ChatRecord }
+  /**
+   * The run failed part-way, after capturing at least one whole message:
+   * `record` is a Partial Chat Record of everything up to the last complete
+   * message, and `continuation` says where a Continuation would pick up.
+   */
+  | { kind: 'partial'; record: ChatRecord; continuation: ContinuationPoint; reason: FailureReason; detail: string }
   /** The requested Date Range has no messages; nothing was made. */
   | { kind: 'no-messages'; from: LocalDay; to: LocalDay }
   /** A Full Chat was requested but WhatsApp Web has no messages in the Chat; nothing was made. */
@@ -112,6 +138,8 @@ interface Run extends Deps {
   onProgress: (progress: RecordProgress) => void;
   /** Throws `Cancelled` if the record has been cancelled. Call it after every wait. */
   checkpoint: () => void;
+  /** Whether the record has been cancelled. */
+  cancelled: () => boolean;
 }
 
 /** Unwinds a cancelled record. */
@@ -141,6 +169,7 @@ async function recordOnce(deps: Deps, request: ChatRecordRequest, options: Recor
     checkpoint() {
       if (signal?.aborted) throw new Cancelled();
     },
+    cancelled: () => signal?.aborted ?? false,
   };
   try {
     run.checkpoint();
@@ -164,7 +193,7 @@ async function recordVisible(run: Run): Promise<ChatRecordOutcome> {
   const slice = await cutSlice(screenshot.bitmap, area, devicePixelRatio, 0, area.height, 0);
   const span = visibleChatSpan(takenAt);
   const stitched = { slices: [slice], area, devicePixelRatio, rows: area.height, pageBreaks: new Set<number>() };
-  return finishRecord({ chatName, span, takenAt, stitched, checkpoint: run.checkpoint });
+  return { kind: 'record', record: await finishRecord({ chatName, span, takenAt, stitched, checkpoint: run.checkpoint }) };
 }
 
 /**
@@ -189,15 +218,17 @@ async function finishRecord(parts: {
   historyIncomplete?: boolean;
   /** Extra Context Band lines, for example about incomplete history. */
   notes?: string[];
+  /** Marks the file name of a Partial Chat Record or a Gap Record. */
+  mark?: 'partial' | 'gap';
   /** Throws if the record was cancelled; checked before and while the image is made. */
   checkpoint: () => void;
-}): Promise<ChatRecordOutcome> {
+}): Promise<ChatRecord> {
   const { chatName, span, takenAt, stitched, checkpoint, notes } = parts;
   const historyIncomplete = parts.historyIncomplete ?? false;
   const { area, devicePixelRatio, rows } = stitched;
   const contextBand = contextBandText({ chatName, span, takenAt, notes });
   const format = rows > maxPngChatAreaHeights * area.height ? 'pdf' : 'png';
-  const fileName = chatRecordFileName(chatName, span, format);
+  const fileName = chatRecordFileName(chatName, span, format, parts.mark);
   try {
     checkpoint();
     let image: Blob;
@@ -216,13 +247,14 @@ async function finishRecord(parts: {
       })();
       image = await pdfOfImages(images, { devicePixelRatio, title: fileName.replace(/\.pdf$/, ''), createdAt: takenAt });
     }
-    return {
-      kind: 'record',
-      record: { chatName, format, image, fileName, span, takenAt, contextBand, historyIncomplete },
-    };
+    return { chatName, format, image, fileName, span, takenAt, contextBand, historyIncomplete };
   } finally {
-    for (const slice of stitched.slices) slice.bitmap.close();
+    closeSlices(stitched.slices);
   }
+}
+
+function closeSlices(slices: Slice[]): void {
+  for (const slice of slices) slice.bitmap.close();
 }
 
 /**
@@ -278,11 +310,8 @@ const maxScrollStops = 10_000;
 const beforeEveryDay: LocalDay = '0000-00-00';
 const afterEveryDay: LocalDay = '9999-99-99';
 
-async function recordDays(
-  run: Run,
-  request: { kind: 'date-range'; from: LocalDay; to: LocalDay } | { kind: 'full-chat' },
-): Promise<ChatRecordOutcome> {
-  const { page, camera } = run;
+async function recordDays(run: Run, request: RangeRequest): Promise<ChatRecordOutcome> {
+  const { page } = run;
   const fullChat = request.kind === 'full-chat';
   const { from, to } = fullChat ? { from: beforeEveryDay, to: afterEveryDay } : request;
   const noMessages: ChatRecordOutcome = fullChat ? { kind: 'empty-chat' } : { kind: 'no-messages', from, to };
@@ -293,30 +322,171 @@ async function recordDays(
   const start = await scrollToFirstDivider(run, from, area.height);
   if (!start || start.divider.day > to) return noMessages;
   const first = start.divider;
+  const historyIncomplete = !fullChat && !start.startReached;
+  const notes = fullChat
+    ? [`Full Chat; earliest available ${first.day}`]
+    : historyIncomplete
+      ? [`Requested from ${from}; earliest available ${first.day}`]
+      : [];
 
-  // Walk down one chat-area height at a time from the first day's divider.
-  // Content positions shift between stops (WhatsApp Web keeps only a window
-  // of the list loaded, adding and dropping rows at either end), so
-  // everything is kept relative to the first divider ("record rows") and
-  // re-anchored at every stop on a row whose top has been captured.
-  const dividerRows = new Map<LocalDay, number>([[first.day, 0]]);
+  const walked = newWalked();
+  const failure = await walkCatching(run, area, dividerStart(first), { kind: 'day', to }, walked);
+  const record = { run, chatName, takenAt, area, walked, notes, historyIncomplete, spanFrom: first.day };
+  if (failure) return partialRecord({ ...record, request, error: failure.error });
+  if (!walked.lastInRange) {
+    closeSlices(walked.slices);
+    return noMessages;
+  }
+  return { kind: 'record', record: await wholeRecord(record) };
+}
+
+/** The parts of a Chat Record that a walk does not know. */
+interface RecordParts {
+  run: Run;
+  chatName: string;
+  takenAt: Date;
+  area: Rect;
+  walked: Walked;
+  /** The first day the record covers. */
+  spanFrom: LocalDay;
+  /** Context Band lines beyond the standard ones. */
+  notes: string[];
+  historyIncomplete?: boolean;
+}
+
+/** A Chat Record of everything a finished walk covered. */
+async function wholeRecord(parts: RecordParts & { mark?: 'gap' }): Promise<ChatRecord> {
+  const { run, walked, area } = parts;
+  const last = walked.lastInRange!;
+  const stitched = { slices: walked.slices, area, devicePixelRatio: walked.devicePixelRatio, rows: last.row, pageBreaks: walked.pageBreaks };
+  return finishRecord({ ...parts, span: { from: parts.spanFrom, to: last.day }, stitched, checkpoint: run.checkpoint });
+}
+
+/**
+ * A Partial Chat Record of a walk that failed with `error`: everything up to
+ * the bottom of the last message captured in full, with a note on why it
+ * stopped, and where a Continuation of `request` would pick up. Rethrows
+ * `error` when no message was captured in full.
+ */
+async function partialRecord(parts: RecordParts & { request: RangeRequest; error: unknown }): Promise<ChatRecordOutcome> {
+  const { run, walked, area, error } = parts;
+  const last = walked.lastComplete;
+  if (!last) {
+    closeSlices(walked.slices);
+    throw error;
+  }
+  const reason = failureReason(error);
+  const detail = errorMessage(error);
+  const lastMessage = { id: last.id, day: last.day, ...(last.time ? { time: last.time } : {}) };
+  const note = `Partial: stopped after ${describeMessage(lastMessage)}, run failed: ${detail}`;
+  const stitched = { slices: walked.slices, area, devicePixelRatio: walked.devicePixelRatio, rows: last.row, pageBreaks: walked.pageBreaks };
+  const record = await finishRecord({
+    ...parts,
+    span: { from: parts.spanFrom, to: last.day },
+    stitched,
+    notes: [...parts.notes, note],
+    mark: 'partial',
+    checkpoint: run.checkpoint,
+  });
+  const continuation: ContinuationPoint = {
+    chatName: parts.chatName,
+    request: parts.request,
+    lastMessage,
+    reason,
+    partialFileName: record.fileName,
+  };
+  return { kind: 'partial', record, continuation, reason, detail };
+}
+
+/** "2026-11-02 14:32", or just the day when the time is not known. */
+function describeMessage(message: { day: LocalDay; time?: string }): string {
+  return message.time ? `${message.day} ${message.time}` : message.day;
+}
+
+/** Where a walk starts: which content position is record row 0, and what is known above it. */
+interface WalkStart {
+  /** The content position of record row 0, as read at the last stop. */
+  origin: number;
+  /** Record rows of rows at or above row 0 that are fixed, by `itemKey`; one must still be loaded at the first stop. */
+  anchors: Map<string, number>;
+  /** Record rows of date dividers at or above row 0, by day. */
+  dividerRows: Map<LocalDay, number>;
+}
+
+/** Starts a walk at the top of a date divider. */
+function dividerStart(divider: DateDivider): WalkStart {
+  return {
+    origin: divider.top,
+    anchors: new Map([[itemKey(divider), 0]]),
+    dividerRows: new Map([[divider.day, 0]]),
+  };
+}
+
+/** Where a walk ends: after the last message of day `to`. */
+type WalkEnd = { kind: 'day'; to: LocalDay };
+
+/** What a walk has captured so far, kept up to date so it can still be used when the walk fails part-way. */
+interface Walked {
+  slices: Slice[];
+  devicePixelRatio: number;
+  /** Record rows where a PDF page may start: the tops of messages and date dividers. */
+  pageBreaks: Set<number>;
+  /** The bottom row and day of the last message in range seen so far, captured or not. */
+  lastInRange?: { row: number; day: LocalDay };
+  /** The last message in range captured in full, with the record row of its bottom. */
+  lastComplete?: { id: string; day: LocalDay; time?: string; row: number };
+}
+
+function newWalked(): Walked {
+  return { slices: [], devicePixelRatio: 1, pageBreaks: new Set() };
+}
+
+/** Walks as `walk` does; resolves with the error if it failed (not if it was cancelled, which still throws). */
+async function walkCatching(
+  run: Run,
+  area: Rect,
+  start: WalkStart,
+  end: WalkEnd,
+  walked: Walked,
+): Promise<{ error: unknown } | undefined> {
+  try {
+    await walk(run, area, start, end, walked);
+    return undefined;
+  } catch (error) {
+    if (error instanceof Cancelled || run.cancelled()) {
+      closeSlices(walked.slices);
+      throw new Cancelled();
+    }
+    return { error };
+  }
+}
+
+/**
+ * Walks down the Chat one chat-area height at a time from `start`, capturing
+ * every screen into `walked`, until `end`.
+ *
+ * Content positions shift between stops (WhatsApp Web keeps only a window of
+ * the list loaded, adding and dropping rows at either end), so everything is
+ * kept relative to row 0 ("record rows") and re-anchored at every stop on a
+ * row whose top has been captured.
+ */
+async function walk(run: Run, area: Rect, start: WalkStart, end: WalkEnd, walked: Walked): Promise<void> {
+  const { page, camera } = run;
+  const { to } = end;
+  const dividerRows = new Map(start.dividerRows);
   /**
    * The record rows of the tops of rows already captured, by `itemKey`. Only
    * these are fixed points: a row further down may move when a long message
    * above it is expanded, but everything above a captured top was expanded
-   * when it was on screen. The first divider is row 0 by definition.
+   * when it was on screen.
    */
-  const capturedTops = new Map<string, number>([[itemKey(first), 0]]);
-  /** Record rows where a PDF page may start: the tops of messages and date dividers. */
-  const pageBreaks = new Set<number>();
-  let origin = first.top;
-  let lastInRange: { row: number; day: LocalDay } | undefined;
+  const capturedTops = new Map(start.anchors);
+  const { pageBreaks, slices } = walked;
+  let origin = start.origin;
   let endKnown = false;
   let covered = 0;
   /** Scrolls in a row that landed below where the Chat Record continues. */
   let missedScrolls = 0;
-  let devicePixelRatio = 1;
-  const slices: Slice[] = [];
 
   await page.scrollTo(origin);
   for (let stop = 0; ; stop++) {
@@ -326,6 +496,8 @@ async function recordDays(
     const items = page.loadedItems();
     origin = anchoredOrigin(items, capturedTops);
 
+    /** The messages in range at this stop, in record rows. */
+    const inRange: { item: Extract<ChatItem, { kind: 'message' }>; top: number; bottom: number; day: LocalDay }[] = [];
     let day: LocalDay | undefined;
     for (const item of items) {
       const top = item.top - origin;
@@ -340,7 +512,9 @@ async function recordDays(
       }
       if (top < 0) continue;
       day ??= dayAt(dividerRows, top);
-      if (day <= to && (!lastInRange || bottom > lastInRange.row)) lastInRange = { row: bottom, day };
+      if (day > to) continue;
+      inRange.push({ item, top, bottom, day });
+      if (!walked.lastInRange || bottom > walked.lastInRange.row) walked.lastInRange = { row: bottom, day };
     }
 
     const scrollTop = page.scrollTop();
@@ -348,7 +522,7 @@ async function recordDays(
     if (atBottom) endKnown = true;
     const visibleFrom = scrollTop - origin;
     const visibleTo = visibleFrom + area.height;
-    const end = endKnown ? (lastInRange?.row ?? 0) : Infinity;
+    const endRow = endKnown ? (walked.lastInRange?.row ?? 0) : Infinity;
 
     if (visibleFrom > covered) {
       // WhatsApp Web shifted the list after the scroll target was worked out
@@ -362,34 +536,27 @@ async function recordDays(
       continue;
     }
     missedScrolls = 0;
-    if (covered < Math.min(visibleTo, end)) {
+    if (covered < Math.min(visibleTo, endRow)) {
       const screenshot = await camera.capture();
       run.checkpoint();
-      devicePixelRatio = screenshot.devicePixelRatio;
-      const sliceTo = Math.min(visibleTo, end);
-      slices.push(await cutSlice(screenshot.bitmap, area, devicePixelRatio, covered, sliceTo, visibleFrom));
+      walked.devicePixelRatio = screenshot.devicePixelRatio;
+      const sliceTo = Math.min(visibleTo, endRow);
+      slices.push(await cutSlice(screenshot.bitmap, area, walked.devicePixelRatio, covered, sliceTo, visibleFrom));
       covered = sliceTo;
+      for (const { item, bottom, day: messageDay } of inRange) {
+        if (bottom > covered || (walked.lastComplete && bottom <= walked.lastComplete.row)) continue;
+        walked.lastComplete = { id: item.id, day: messageDay, row: bottom, ...(item.time ? { time: item.time } : {}) };
+      }
       run.onProgress({ screensCaptured: slices.length, reachedDay: dayAt(dividerRows, covered - 1) });
     }
     for (const item of items) {
       const top = item.top - origin;
       if (top >= 0 && top <= covered) capturedTops.set(itemKey(item), top);
     }
-    if (endKnown && covered >= end) break;
+    if (endKnown && covered >= endRow) return;
     if (atBottom) throw new Error('WhatsApp Web stopped scrolling before the end of the range');
     await page.scrollTo(origin + covered - captureOverlap);
   }
-
-  if (!lastInRange) return noMessages;
-  const span = { from: first.day, to: lastInRange.day };
-  const historyIncomplete = !fullChat && !start.startReached;
-  const notes = fullChat
-    ? [`Full Chat; earliest available ${first.day}`]
-    : historyIncomplete
-      ? [`Requested from ${from}; earliest available ${first.day}`]
-      : [];
-  const stitched = { slices, area, devicePixelRatio, rows: lastInRange.row, pageBreaks };
-  return finishRecord({ chatName, span, takenAt, stitched, checkpoint: run.checkpoint, historyIncomplete, notes });
 }
 
 /**

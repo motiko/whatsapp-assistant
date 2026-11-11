@@ -22,6 +22,12 @@ describe('Chat Record file name', () => {
     );
   });
 
+  test('marks a Partial Chat Record and a Gap Record before the extension', () => {
+    const span = { from: '2026-01-01', to: '2026-03-14' };
+    expect(chatRecordFileName('Joy', span, 'pdf', 'partial')).toBe('Chat history - Joy - 2026-01-01 to 2026-03-14 (partial).pdf');
+    expect(chatRecordFileName('Joy', oneDay, 'png', 'gap')).toBe('Chat history - Joy - 2026-11-11 (gap).png');
+  });
+
   test('replaces slashes, colons and every other character a file name cannot hold', () => {
     expect(chatRecordFileName('a/b\\c:d*e?f"g<h>i|j', oneDay, 'png')).toBe(
       'Chat history - a_b_c_d_e_f_g_h_i_j - 2026-11-11.png',

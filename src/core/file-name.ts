@@ -3,11 +3,19 @@ import { formatDaySpan, type DaySpan } from './day-span';
 /**
  * The file name a Chat Record is saved under:
  * `Chat history - <Chat name> - <from> to <to>.<format>`, with ISO dates and
- * a single date for a single day. Characters no file name may hold are
- * replaced with `_`; emoji and other letters are kept as they are.
+ * a single date for a single day, and ` (partial)` or ` (gap)` before the
+ * extension for a Partial Chat Record or a Gap Record. Characters no file
+ * name may hold are replaced with `_`; emoji and other letters are kept as
+ * they are.
  */
-export function chatRecordFileName(chatName: string, span: DaySpan, format: 'png' | 'pdf'): string {
-  return `Chat history - ${safeChatName(chatName)} - ${formatDaySpan(span)}.${format}`;
+export function chatRecordFileName(
+  chatName: string,
+  span: DaySpan,
+  format: 'png' | 'pdf',
+  mark?: 'partial' | 'gap',
+): string {
+  const suffix = mark ? ` (${mark})` : '';
+  return `Chat history - ${safeChatName(chatName)} - ${formatDaySpan(span)}${suffix}.${format}`;
 }
 
 /** Longest Chat name kept, in UTF-8 bytes, so the whole name fits in 255 bytes. */

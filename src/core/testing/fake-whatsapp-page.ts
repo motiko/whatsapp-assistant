@@ -37,6 +37,12 @@ export interface FakeWhatsAppPage extends WhatsAppPage {
   dropRowsAbove(count: number): void;
 }
 
+/** The time of day the `n`th message of a fake day shows: 08:01, 08:02, … 08:59, 09:00, … */
+export function fakeMessageTime(n: number): string {
+  const pad = (value: number) => String(value).padStart(2, '0');
+  return `${pad(8 + Math.floor(n / 60))}:${pad(n % 60)}`;
+}
+
 /** Every date divider in a fake Chat is this tall (CSS px). */
 export const fakeDividerHeight = 40;
 
@@ -44,7 +50,8 @@ export const fakeDividerHeight = 40;
  * A scripted WhatsApp Page: an open Chat with a known name and layout, and a
  * timeline of days laid out top to bottom from Chat position 0. Each day is a
  * date divider (`fakeDividerHeight` tall) followed by its messages, with no
- * space between rows. Messages are named `<day> #<n>`, counting from 1.
+ * space between rows. Messages are named `<day> #<n>`, counting from 1, and
+ * show the time `fakeMessageTime(n)`.
  *
  * Like WhatsApp Web it opens scrolled to the newest message, and only reports
  * the rows near the visible part of the list (one chat-area height above and
@@ -96,7 +103,13 @@ export function createFakeWhatsAppPage(options: {
       for (const [index, message] of messageHeights.entries()) {
         const rowHeight =
           typeof message === 'number' ? message : expanded.has(message) ? message.expanded : message.truncated;
-        const item: ChatItem = { kind: 'message', id: `${day} #${index + 1}`, top: y, bottom: y + rowHeight };
+        const item: ChatItem = {
+          kind: 'message',
+          id: `${day} #${index + 1}`,
+          time: fakeMessageTime(index + 1),
+          top: y,
+          bottom: y + rowHeight,
+        };
         rows.push(item);
         if (typeof message !== 'number' && !expanded.has(message)) truncatedRows.set(item, message);
         y += rowHeight;
