@@ -26,11 +26,12 @@ export default defineContentScript({
         const outcome = recorder.record({ kind: 'visible' });
         // Start the clipboard write now, inside the click, with the PNG to follow.
         const copied = copyPngToClipboard(
-          outcome.then((o) => (o.kind === 'record' ? o.record.image : Promise.reject(new Error(o.detail)))),
+          outcome.then((o) => (o.kind === 'record' ? o.record.image : Promise.reject(new Error(o.kind)))),
         );
         return Promise.all([outcome, copied.then(() => undefined, (error: unknown) => error)])
           .then(([o, clipboardError]): CreateResult => {
             if (o.kind === 'failed') return o;
+            if (o.kind === 'no-messages') return { kind: 'failed', reason: 'capture-failed', detail: 'no messages' };
             if (clipboardError) return { kind: 'failed', reason: 'clipboard-failed', detail: String(clipboardError) };
             return { kind: 'copied' };
           })
