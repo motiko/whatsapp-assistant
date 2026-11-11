@@ -15,9 +15,10 @@ const maxChatNameBytes = 150;
 
 function safeChatName(chatName: string): string {
   const safe = chatName
-    // Invisible direction marks (common in WhatsApp names): Chrome refuses
-    // file names holding them, and they show nothing.
-    .replace(/[‎‏‪-‮⁦-⁩﻿]/g, '')
+    // Invisible format characters: direction marks (common in WhatsApp
+    // names) and the joiners inside emoji such as 👨‍👩‍👧. Chrome turns each
+    // into "_" when it saves a download; without them, the emoji remain.
+    .replace(/\p{Cf}/gu, '')
     // Line breaks and tabs become spaces.
     .replace(/[\t\n\r]+/g, ' ')
     // Not allowed in file names on Windows, macOS or Linux, or by Chrome.

@@ -28,10 +28,14 @@ describe('Chat Record file name', () => {
     );
   });
 
-  test('keeps emoji, including ones joined from several characters and flags', () => {
-    expect(chatRecordFileName('Family 👨‍👩‍👧 🇩🇪 trip 🎉', oneDay, 'png')).toBe(
-      'Chat history - Family 👨‍👩‍👧 🇩🇪 trip 🎉 - 2026-11-11.png',
-    );
+  test('keeps emoji, with skin tones, variation selectors and flags', () => {
+    expect(chatRecordFileName('Trip 🇩🇪 👍🏽 ❤️ 🎉', oneDay, 'png')).toBe('Chat history - Trip 🇩🇪 👍🏽 ❤️ 🎉 - 2026-11-11.png');
+  });
+
+  // Chrome turns invisible format characters, such as the joiner inside 👨‍👩‍👧,
+  // into "_" when it saves a download; dropping them keeps the emoji themselves.
+  test('splits joined emoji into the emoji they are made of', () => {
+    expect(chatRecordFileName('Family 👨‍👩‍👧', oneDay, 'png')).toBe('Chat history - Family 👨👩👧 - 2026-11-11.png');
   });
 
   test('keeps letters of other scripts', () => {
@@ -53,9 +57,9 @@ describe('Chat Record file name', () => {
   });
 
   test('shortens a very long Chat name so the file name fits in 255 bytes, without splitting an emoji', () => {
-    const name = chatRecordFileName('👨‍👩‍👧'.repeat(40), { from: '2026-10-01', to: '2026-10-31' }, 'png');
+    const name = chatRecordFileName('👍🏽'.repeat(60), { from: '2026-10-01', to: '2026-10-31' }, 'png');
 
     expect(new TextEncoder().encode(name).length).toBeLessThanOrEqual(255);
-    expect(name).toMatch(/^Chat history - (👨‍👩‍👧)+… - 2026-10-01 to 2026-10-31\.png$/u);
+    expect(name).toMatch(/^Chat history - (👍🏽)+… - 2026-10-01 to 2026-10-31\.png$/u);
   });
 });
