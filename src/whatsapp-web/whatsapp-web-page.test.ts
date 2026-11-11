@@ -175,13 +175,14 @@ describe('WhatsApp Web adapter loading older messages', () => {
    */
   function addOlderDayLater(doc: Document, delayMs = 30) {
     setTimeout(() => {
-      const list = doc.querySelector('[role="application"]')!;
+      const list = doc.querySelector('#main [data-tab="8"]')!;
       const rows = ['<div class="_amjw focusable-list-item"><span dir="auto">20/10/2026</span></div>'];
       for (const n of [1, 2]) {
         rows.push(`<div class="message-in focusable-list-item" data-id="false_10000000001@c.us_OLDER000${n}"><div class="_amk6">Older message ${n}.</div></div>`);
       }
       const older = rows.map((html) => Object.assign(doc.createElement('div'), { innerHTML: html }));
-      older.forEach((row) => row.setAttribute('role', 'row'));
+      // Like the real page: messages are rows, date dividers are not.
+      older.slice(1).forEach((row) => row.setAttribute('role', 'row'));
       const firstDay = Array.from(list.children).find((row) => row.querySelector('._amjw'))!;
       firstDay.before(...older);
     }, delayMs);
@@ -228,7 +229,7 @@ describe('WhatsApp Web adapter loading older messages', () => {
     let clicks = 0;
     prompt.addEventListener('click', () => {
       clicks++;
-      prompt.closest('[role="row"]')!.remove();
+      prompt.closest('._ahmw')!.parentElement!.remove();
       addOlderDayLater(doc);
     });
 

@@ -13,16 +13,19 @@ export const selectors = {
   chatHeader: '#main header',
   /** Text spans in the Chat header; the first non-empty one is the Chat's name. */
   chatHeaderText: 'span[dir="auto"]',
-  /** The list of messages and date dividers, inside the conversation pane. */
-  messageList: '#main [role="application"]',
-  /** Each item of the message list: a date divider, a message, or another row (e.g. an unread banner). */
-  messageListRow: '[role="row"]',
+  /*
+   * The message list has no role or id of its own: it is the content of the
+   * conversation pane's tallest scrolling element, and each of its children
+   * is one item — a message, a date divider, or something else (an unread
+   * banner, the older-messages prompt). Messages hold a `[role="row"]`; date
+   * dividers do not. (Checked against the real page, Nov 2026.)
+   */
   /** Present inside a row that is a message (its id names the Chat and the message). */
   message: '[data-id]',
   /** The "Read more" button inside a message WhatsApp Web shows cut short. */
   readMore: '.read-more-button',
   /**
-   * Clickable elements in a message-list row that is not a message; one whose
+   * Clickable elements in a message-list item that is not a message; one whose
    * text matches `olderMessagesPromptText` is the prompt to get older
    * messages from the phone. (Unverified against the real page.)
    */

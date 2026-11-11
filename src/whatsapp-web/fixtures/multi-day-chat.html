@@ -29,7 +29,7 @@
   ._ajyl { flex: 1; min-height: 0; overflow-y: scroll; overflow-x: hidden; }
   ._ajyl::-webkit-scrollbar { width: 6px; }
   ._ajyl::-webkit-scrollbar-thumb { background: rgba(11, 20, 26, .2); }
-  [role="application"] { padding: 12px 63px 8px; }
+  ._list { padding: 12px 63px 8px; }
   ._amjw { display: flex; justify-content: center; margin: 12px 0; }
   ._amjw span { background: #fff; border-radius: 7.5px; padding: 5px 12px; font-size: 12.5px; text-transform: uppercase; color: #54656f; }
   .message-in, .message-out { display: flex; margin-bottom: 2px; }
@@ -43,7 +43,7 @@
   /* Fixed row heights, so the adapter tests can state exact positions:
      list padding 12 on top, date divider rows 50, message rows 60,
      the unread-messages banner 40. */
-  [role="application"] { padding-top: 12px; padding-bottom: 8px; }
+  ._list { padding-top: 12px; padding-bottom: 8px; }
   [role="row"] { overflow: hidden; }
   ._amjw { margin: 0; padding: 12px 0; height: 26px; box-sizing: content-box; }
   .message-in, .message-out { height: 60px; margin: 0; box-sizing: border-box; padding-bottom: 2px; }
@@ -79,9 +79,9 @@
           </div>
         </header>
         <div class="copyable-area">
-          <div tabindex="0" data-tab="8" class="_ajyl x1y332i5">
-            <div role="application" tabindex="-1" aria-label="Message list. Press right arrow key on a message to open message context menu.">
-              <div role="row" tabindex="-1"><div class="_amjw focusable-list-item"><span dir="auto">28/10/2026</span></div></div>
+          <div tabindex="0" class="_ajyl x1y332i5">
+            <div tabindex="0" data-tab="8" class="_list">
+              <div tabindex="-1"><div class="_amjw focusable-list-item"><span dir="auto">28/10/2026</span></div></div>
               <div role="row" tabindex="-1">
                 <div class="message-in focusable-list-item" data-id="false_10000000001@c.us_SYNTH0001">
                   <div class="_amk6"><div class="copyable-text" data-pre-plain-text="[09:07, 28/10/2026] Contact A: "><span dir="ltr" class="selectable-text copyable-text"><span>Placeholder message 1.</span></span><span class="_amk4">09:07</span></div></div>
@@ -112,7 +112,7 @@
                   <div class="_amk6"><div class="copyable-text" data-pre-plain-text="[14:42, 28/10/2026] Me: "><span dir="ltr" class="selectable-text copyable-text"><span>Placeholder message 6.</span></span><span class="_amk4">14:42</span></div></div>
                 </div>
               </div>
-              <div role="row" tabindex="-1"><div class="_amjw focusable-list-item"><span dir="auto">03/11/2026</span></div></div>
+              <div tabindex="-1"><div class="_amjw focusable-list-item"><span dir="auto">03/11/2026</span></div></div>
               <div role="row" tabindex="-1">
                 <div class="message-in focusable-list-item" data-id="false_10000000001@c.us_SYNTH0007">
                   <div class="_amk6"><div class="copyable-text" data-pre-plain-text="[09:49, 03/11/2026] Contact A: "><span dir="ltr" class="selectable-text copyable-text"><span>Placeholder message 7.</span></span><span class="_amk4">09:49</span></div></div>
@@ -143,7 +143,7 @@
                   <div class="_amk6"><div class="copyable-text" data-pre-plain-text="[14:24, 03/11/2026] Me: "><span dir="ltr" class="selectable-text copyable-text"><span>Placeholder message 12.</span></span><span class="_amk4">14:24</span></div></div>
                 </div>
               </div>
-              <div role="row" tabindex="-1"><div class="_amjw focusable-list-item"><span dir="auto">Monday</span></div></div>
+              <div tabindex="-1"><div class="_amjw focusable-list-item"><span dir="auto">Monday</span></div></div>
               <div role="row" tabindex="-1">
                 <div class="message-in focusable-list-item" data-id="false_10000000001@c.us_SYNTH0013">
                   <div class="_amk6"><div class="copyable-text" data-pre-plain-text="[09:31, 09/11/2026] Contact A: "><span dir="ltr" class="selectable-text copyable-text"><span>Placeholder message 13.</span></span><span class="_amk4">09:31</span></div></div>
@@ -169,7 +169,7 @@
                   <div class="_amk6"><div class="copyable-text" data-pre-plain-text="[13:59, 09/11/2026] Contact A: "><span dir="ltr" class="selectable-text copyable-text"><span>Placeholder message 17.</span></span><span class="_amk4">13:59</span></div></div>
                 </div>
               </div>
-              <div role="row" tabindex="-1"><div class="_amjw focusable-list-item"><span dir="auto">Yesterday</span></div></div>
+              <div tabindex="-1"><div class="_amjw focusable-list-item"><span dir="auto">Yesterday</span></div></div>
               <div role="row" tabindex="-1">
                 <div class="message-out focusable-list-item" data-id="true_10000000001@c.us_SYNTH0018">
                   <div class="_amk6"><div class="copyable-text" data-pre-plain-text="[09:06, 10/11/2026] Me: "><span dir="ltr" class="selectable-text copyable-text"><span>Placeholder message 18.</span></span><span class="_amk4">09:06</span></div></div>
@@ -195,7 +195,7 @@
                   <div class="_amk6"><div class="copyable-text" data-pre-plain-text="[13:34, 10/11/2026] Me: "><span dir="ltr" class="selectable-text copyable-text"><span>Placeholder message 22.</span></span><span class="_amk4">13:34</span></div></div>
                 </div>
               </div>
-              <div role="row" tabindex="-1"><div class="_amjw focusable-list-item"><span dir="auto">Today</span></div></div>
+              <div tabindex="-1"><div class="_amjw focusable-list-item"><span dir="auto">Today</span></div></div>
               <div role="row" tabindex="-1">
                 <div class="message-in focusable-list-item" data-id="false_10000000001@c.us_SYNTH0023">
                   <div class="_amk6"><div class="copyable-text" data-pre-plain-text="[09:41, 11/11/2026] Contact A: "><span dir="ltr" class="selectable-text copyable-text"><span>Placeholder message 23.</span></span><span class="_amk4">09:41</span></div></div>
@@ -206,7 +206,7 @@
                   <div class="_amk6"><div class="copyable-text" data-pre-plain-text="[10:48, 11/11/2026] Me: "><span dir="ltr" class="selectable-text copyable-text"><span>Placeholder message 24.</span></span><span class="_amk4">10:48</span></div></div>
                 </div>
               </div>
-              <div role="row" tabindex="-1"><div class="_agtb focusable-list-item"><span>2 unread messages</span></div></div>
+              <div tabindex="-1"><div class="_agtb focusable-list-item"><span>2 unread messages</span></div></div>
               <div role="row" tabindex="-1">
                 <div class="message-in focusable-list-item" data-id="false_10000000001@c.us_SYNTH0025">
                   <div class="_amk6"><div class="copyable-text" data-pre-plain-text="[11:55, 11/11/2026] Contact A: "><span dir="ltr" class="selectable-text copyable-text"><span>Placeholder message 25.</span></span><span class="_amk4">11:55</span></div></div>

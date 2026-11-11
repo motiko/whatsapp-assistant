@@ -118,13 +118,13 @@ export function createWhatsAppWebPage(doc: Document, options: WhatsAppWebPageOpt
  */
 const maxReadMoreRounds = 20;
 
-/** Every row of the message list, with its vertical span in content positions. */
+/** Every item of the message list, with its vertical span in content positions. */
 function listRows(doc: Document): { row: Element; span: { top: number; bottom: number } }[] {
   const scroller = messageScroller(doc);
-  const list = find(doc, selectors.messageList, 'the message list');
+  const list = messageList(doc);
   // Content position 0 is the top of the scroll container's content.
   const origin = scroller.getBoundingClientRect().top + scroller.clientTop - scroller.scrollTop;
-  return Array.from(list.querySelectorAll(selectors.messageListRow), (row) => {
+  return Array.from(list.children, (row) => {
     const box = row.getBoundingClientRect();
     return { row, span: { top: box.top - origin, bottom: box.bottom - origin } };
   });
@@ -136,7 +136,7 @@ function listRows(doc: Document): { row: Element; span: { top: number; bottom: n
  * the list's height, tells that older ones arrived.
  */
 function oldestMessage(doc: Document): string | undefined {
-  const list = find(doc, selectors.messageList, 'the message list');
+  const list = messageList(doc);
   return list.querySelector(selectors.message)?.getAttribute('data-id') ?? undefined;
 }
 
@@ -152,8 +152,7 @@ async function waitFor(view: Window, condition: () => boolean, waitMs: number): 
 
 /** WhatsApp Web's "get older messages from your phone" prompt, if it shows one. */
 function olderMessagesPrompt(doc: Document): HTMLElement | undefined {
-  const list = find(doc, selectors.messageList, 'the message list');
-  for (const row of list.querySelectorAll(selectors.messageListRow)) {
+  for (const row of messageList(doc).children) {
     if (row.querySelector(selectors.message)) continue;
     for (const button of row.querySelectorAll<HTMLElement>(selectors.rowButton)) {
       if (olderMessagesPromptText.test(button.textContent ?? '')) return button;
@@ -174,18 +173,33 @@ async function settle(view: Window, scroller: HTMLElement, settleMs: number): Pr
 
 /**
  * The element that scrolls the message list. WhatsApp Web gives it only a
- * generated class name, so it is found as the message list's nearest
- * scrolling ancestor inside the conversation pane.
+ * generated class name, so it is found as the tallest scrolling element in
+ * the conversation pane (the message box can scroll too, but is short).
  */
 function messageScroller(doc: Document): HTMLElement {
   const pane = find(doc, selectors.conversationPane, 'the conversation pane');
-  const list = find(doc, selectors.messageList, 'the message list');
   const view = doc.defaultView!;
-  for (let element = list.parentElement; element && element !== pane; element = element.parentElement) {
+  let tallest: HTMLElement | undefined;
+  for (const element of pane.querySelectorAll<HTMLElement>('*')) {
     const { overflowY } = view.getComputedStyle(element);
-    if (overflowY === 'auto' || overflowY === 'scroll') return element;
+    if (overflowY !== 'auto' && overflowY !== 'scroll') continue;
+    if (!tallest || element.clientHeight > tallest.clientHeight) tallest = element;
   }
-  throw new PageNotRecognisedError('the scrolling container of the message list is missing');
+  if (!tallest) throw new PageNotRecognisedError('the scrolling container of the message list is missing');
+  return tallest;
+}
+
+/**
+ * The message list: the scroller's child that holds the items (the one with
+ * messages in it, or else the tallest).
+ */
+function messageList(doc: Document): Element {
+  const children = Array.from(messageScroller(doc).children);
+  const list =
+    children.find((child) => child.querySelector(selectors.message)) ??
+    children.reduce<Element | undefined>((a, b) => (!a || b.scrollHeight > a.scrollHeight ? b : a), undefined);
+  if (!list) throw new PageNotRecognisedError('the message list is missing');
+  return list;
 }
 
 function clipToViewport(area: Rect, doc: Document): Rect {

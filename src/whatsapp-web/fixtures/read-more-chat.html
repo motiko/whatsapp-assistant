@@ -30,7 +30,7 @@
   ._ajyl { flex: 1; min-height: 0; overflow-y: scroll; overflow-x: hidden; }
   ._ajyl::-webkit-scrollbar { width: 6px; }
   ._ajyl::-webkit-scrollbar-thumb { background: rgba(11, 20, 26, .2); }
-  [role="application"] { padding: 12px 63px 8px; }
+  ._list { padding: 12px 63px 8px; }
   ._amjw { display: flex; justify-content: center; margin: 12px 0; }
   ._amjw span { background: #fff; border-radius: 7.5px; padding: 5px 12px; font-size: 12.5px; text-transform: uppercase; color: #54656f; }
   .message-in, .message-out { display: flex; margin-bottom: 2px; }
@@ -46,7 +46,7 @@
      20 of padding plus 20 per line of text (and 20 for "Read more"), so a
      two-line message is 60 tall and a truncated one (three lines and
      "Read more") 100. */
-  [role="application"] { padding-top: 12px; padding-bottom: 8px; }
+  ._list { padding-top: 12px; padding-bottom: 8px; }
   [role="row"] { overflow: hidden; }
   ._amjw { margin: 0; padding: 12px 0; height: 26px; box-sizing: content-box; }
   .message-in, .message-out { margin: 0; padding: 10px 0; }
@@ -85,9 +85,9 @@
           </div>
         </header>
         <div class="copyable-area">
-          <div tabindex="0" data-tab="8" class="_ajyl x1y332i5">
-            <div role="application" tabindex="-1" aria-label="Message list. Press right arrow key on a message to open message context menu.">
-              <div role="row" tabindex="-1"><div class="_amjw focusable-list-item"><span dir="auto">Today</span></div></div>
+          <div tabindex="0" class="_ajyl x1y332i5">
+            <div tabindex="0" data-tab="8" class="_list">
+              <div tabindex="-1"><div class="_amjw focusable-list-item"><span dir="auto">Today</span></div></div>
               <div role="row" tabindex="-1">
                 <div class="message-in focusable-list-item" data-id="false_10000000001@c.us_SYNTH0001">
                   <div class="_amk6"><div class="copyable-text" data-pre-plain-text="[09:07, 11/11/2026] Contact A: "><span dir="ltr" class="selectable-text copyable-text"><span>Placeholder message 1, line 1.</span><span>Placeholder message 1, line 2.</span></span><span class="_amk4">09:07</span></div></div>
