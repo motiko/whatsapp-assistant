@@ -6,12 +6,14 @@ A personal Chrome extension that runs on [WhatsApp Web](https://web.whatsapp.com
 
 Current state ([#2](https://github.com/motiko/whatsapp-assistant/issues/2) walking skeleton,
 [#5](https://github.com/motiko/whatsapp-assistant/issues/5) Date Ranges,
-[#6](https://github.com/motiko/whatsapp-assistant/issues/6) Context Band, file name and Download):
+[#6](https://github.com/motiko/whatsapp-assistant/issues/6) Context Band, file name and Download,
+[#8](https://github.com/motiko/whatsapp-assistant/issues/8) large Chat Records as a PDF):
 a button in the open Chat's header opens a panel where you pick a **Date Range** (From/To pickers
 or the Today, Last 7 days and Last 30 days presets). **Create Chat Record** scrolls the Chat to the
 range itself, captures as many screens as needed and copies them, stitched, to the clipboard as one
-PNG, with a **Context Band** above it; a **Download** button saves the same PNG. Full Chat,
-"Read more" expansion, progress and Cancel, and PDF output come in later tickets of
+PNG, with a **Context Band** above it; a **Download** button saves the same PNG. A Chat Record more
+than 10 chat-area heights tall downloads as a multi-page PDF instead. Full Chat, "Read more"
+expansion, and progress and Cancel come in later tickets of
 [#1](https://github.com/motiko/whatsapp-assistant/issues/1).
 
 ## Requirements
@@ -65,6 +67,13 @@ navigated away, and also opens the panel. If you skip it, the panel tells you to
 6. Click **Download PNG** to also save it as `Chat history - <Chat name> - <from> to <to>.png`
    (a single day reads just `<date>`), named from the days actually covered. The panel confirms
    where the Chat Record went.
+7. A Chat Record more than 10 times as tall as the chat area (about ten screens) is not copied: it
+   downloads straight away as `Chat history - <Chat name> - <from> to <to>.pdf`, and the panel names
+   the file. Each page is about one chat area tall and shows the Chat at its on-screen size. Pages
+   end between messages (at the top of a message or date divider), so no message is split; only a
+   single message taller than a whole page is split, at the page's height. The Context Band is at
+   the top of the first page only. Page images are lossless (the same pixels as a PNG), made on
+   your computer with [pdf-lib](https://github.com/Hopding/pdf-lib); nothing is uploaded.
 
 ## Tests
 
@@ -84,7 +93,9 @@ Tests sit at two seams (see the spec's Testing Decisions in
   the Context Band sits above the WhatsApp pixels and leaves every one of them unchanged). The
   recorder takes an injected clock, and the test browser runs in the `Europe/Berlin` timezone
   (`vitest.config.ts`), so days and "taken at" times are the same on every machine. The file-name
-  builder (`src/core/file-name.test.ts`) is also tested directly.
+  builder (`src/core/file-name.test.ts`) is also tested directly. PDF Chat Records are read back page
+  by page with `src/core/testing/read-pdf.ts`; those tests use a small screen (a 100px chat area) so
+  records taller than ten chat areas stay within the 4095 device pixels the fake Camera can encode.
 - **Date Range fields** (`src/ui/date-range-fields.test.ts`): pickers, presets and validation,
   driven through the DOM with a fixed "today".
 - **WhatsApp Web adapter** (`src/whatsapp-web/*.test.ts`): run against page snapshots in
@@ -97,8 +108,9 @@ Tests sit at two seams (see the spec's Testing Decisions in
 
 | Path | Module |
 | --- | --- |
-| `src/core/chat-recorder.ts` | **Chat Recorder**: request (a Date Range, or the visible chat area) in, outcome out (a Chat Record, *no messages*, or *failed* with a reason). Range resolution, the scroll-and-capture loop, cropping, stitching and adding the Context Band. No Chrome or WhatsApp knowledge. |
+| `src/core/chat-recorder.ts` | **Chat Recorder**: request (a Date Range, or the visible chat area) in, outcome out (a Chat Record, *no messages*, or *failed* with a reason). Range resolution, the scroll-and-capture loop, cropping, stitching, adding the Context Band, and choosing PNG or PDF (with PDF page breaks). No Chrome or WhatsApp knowledge. |
 | `src/core/context-band.ts` | **Context Band**: its text (with optional extra lines) and drawing it above an image, or on its own |
+| `src/core/pdf.ts` | A PDF of page images (lossless, one image per page at its on-screen size), made locally with pdf-lib |
 | `src/core/file-name.ts` | The file name a Chat Record is saved under, safe for every OS and Chrome's downloads |
 | `src/core/day-span.ts` | Local days (ISO `YYYY-MM-DD`) and the span of days a Chat Record covers |
 | `src/core/whatsapp-page.ts` | **WhatsApp Page** interface (Chat name, chat area, scroll position/height, scrolling, loaded date dividers and messages) and `PageNotRecognisedError` |
@@ -169,3 +181,22 @@ Needs a logged-in WhatsApp Web, so it is not automated. Use a fresh `npm run bui
 - [ ] After creating, the panel says the Chat Record was copied and shows **Download PNG**. Click it: the file appears in your Downloads folder as `Chat history - <name> - <from> to <to>.png`, and the panel says it was downloaded under that name.
 - [ ] Download in a Chat whose name has `/`, `:` or emoji (including a joined one such as 👨‍👩‍👧 or a flag): the file saves; `/` and `:` show as `_`, emoji are kept (a joined emoji appears as its parts, e.g. 👨👩👧).
 - [ ] Close and reopen the panel: **Download PNG** is gone until a new Chat Record is made.
+
+## Manual smoke checklist (large Chat Records as a PDF, [#8](https://github.com/motiko/whatsapp-assistant/issues/8))
+
+- [ ] Pick a range a little under ten screens of messages: it is still copied as a PNG, with **Download PNG**.
+- [ ] Pick a long range in a busy Chat (well over ten screens; a few weeks or months): after capture, the
+      panel says it was downloaded as a PDF and names `Chat history - <name> - <from> to <to>.pdf`. Nothing
+      new is on the clipboard and no **Download PNG** is offered. The file is in your Downloads folder
+      (Chrome may ask once whether the page may download files; allow it).
+- [ ] Open the PDF (Preview and Chrome's viewer): page 1 starts with the Context Band, then the first day's
+      date divider; the last page ends right after the last message of the range.
+- [ ] Page through it: every page is about one screen of messages, and each page break falls between two
+      messages (no bubble cut in half, nothing missing or repeated across a break). A message taller than the
+      screen (a very long text) is the only thing that may continue onto the next page.
+- [ ] Zoom in: the pixels are as sharp as the PNG (no JPEG blur); at 100% the Chat looks its on-screen size.
+- [ ] Repeat with dark theme and at a browser zoom other than 100% (e.g. on a Retina screen and an external
+      1x monitor): page breaks still fall between messages and the Context Band text is a sensible size.
+- [ ] A very long record (hundreds of screens): note how long it takes and whether the tab runs out of
+      memory (all screens are kept in memory until the PDF is made).
+- [ ] DevTools' Network panel shows no requests from the extension while the PDF is made.
