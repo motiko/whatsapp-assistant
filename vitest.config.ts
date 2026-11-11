@@ -7,7 +7,8 @@ export default defineConfig({
     browser: {
       enabled: true,
       headless: true,
-      provider: playwright(),
+      // Real Chrome shows scrollbars; headless Playwright hides them by default.
+      provider: playwright({ launchOptions: { ignoreDefaultArgs: ['--hide-scrollbars'] } }),
       instances: [{ browser: 'chromium' }],
       viewport: { width: 1280, height: 800 },
     },
