@@ -412,6 +412,69 @@ describe('progress while a Date Range is recorded', () => {
   });
 });
 
+describe('one Chat Record at a time', () => {
+  test('refuses a second start while one is running, and the first still finishes', async () => {
+    const recorder = recorderFor(sixDays);
+    const range = { kind: 'date-range', from: '2026-11-02', to: '2026-11-04' } as const;
+
+    const first = recorder.record(range);
+    const second = await recorder.record(range);
+
+    expect(second).toMatchObject({ kind: 'failed', reason: 'busy' });
+    expect(await first).toMatchObject({ kind: 'record', record: { span: { from: '2026-11-02', to: '2026-11-04' } } });
+  });
+
+  test('can start again once the previous one has ended', async () => {
+    const recorder = recorderFor(sixDays);
+
+    await recorder.record({ kind: 'date-range', from: '2026-11-02', to: '2026-11-02' }, { signal: AbortSignal.abort() });
+    const again = await recorder.record({ kind: 'date-range', from: '2026-11-02', to: '2026-11-02' });
+
+    expect(again.kind).toBe('record');
+  });
+});
+
+describe('a Chat Record that fails part-way', () => {
+  test('fails with "page not recognised", producing nothing, when WhatsApp Web changes mid-walk', async () => {
+    const fake = createFakeWhatsAppPage({ chatName: 'Alice', chatArea, chat: sixDays });
+    let screens = 0;
+    const page: WhatsAppPage = {
+      ...fake,
+      loadedItems() {
+        if (screens >= 1) throw new PageNotRecognisedError('no message list');
+        return fake.loadedItems();
+      },
+    };
+    const recorder = createChatRecorder({ page, camera: createFakeCamera({ viewport, page }) });
+
+    const outcome = await recorder.record(
+      { kind: 'date-range', from: '2026-11-02', to: '2026-11-04' },
+      { onProgress: (p) => (screens = p.screensCaptured) },
+    );
+
+    expect(outcome).toEqual({
+      kind: 'failed',
+      reason: 'page-not-recognised',
+      detail: "WhatsApp Web's page was not recognised: no message list",
+    });
+  });
+
+  test('stops reporting progress after the Camera fails', async () => {
+    const page = createFakeWhatsAppPage({ chatName: 'Alice', chatArea, chat: sixDays });
+    const camera = createFakeCamera({ viewport, page, fails: new Error('Tab is hidden'), failsAfter: 1 });
+    const recorder = createChatRecorder({ page, camera });
+    const progress: number[] = [];
+
+    const outcome = await recorder.record(
+      { kind: 'date-range', from: '2026-11-02', to: '2026-11-04' },
+      { onProgress: (p) => progress.push(p.screensCaptured) },
+    );
+
+    expect(outcome).toEqual({ kind: 'failed', reason: 'capture-failed', detail: 'Tab is hidden' });
+    expect(progress).toEqual([1]);
+  });
+});
+
 /** A Camera that counts its captures. */
 function countingCamera(camera: Camera) {
   const counted = { captures: 0, capture: () => camera.capture().finally(() => counted.captures++) };

@@ -47,7 +47,9 @@ export type FailureReason =
   /** Chrome has not given the extension access to capture this tab. */
   | 'capture-not-allowed'
   /** Capturing the screen failed for another reason (for example a hidden tab). */
-  | 'capture-failed';
+  | 'capture-failed'
+  /** Another Chat Record is still being made; only one runs at a time. */
+  | 'busy';
 
 /** How far a Chat Record has got, reported after every screen captured. */
 export interface RecordProgress {
@@ -71,6 +73,7 @@ export interface RecordOptions {
 }
 
 export interface ChatRecorder {
+  /** Makes one Chat Record. While one is being made, another `record` fails at once with `busy`. */
   record(request: ChatRecordRequest, options?: RecordOptions): Promise<ChatRecordOutcome>;
 }
 
@@ -95,27 +98,38 @@ class Cancelled extends Error {}
 
 export function createChatRecorder({ page, camera, clock }: ChatRecorderDeps): ChatRecorder {
   const deps: Deps = { page, camera, clock: clock ?? (() => new Date()) };
+  let busy = false;
   return {
     async record(request, options = {}) {
-      const { signal } = options;
-      const run: Run = {
-        ...deps,
-        onProgress: options.onProgress ?? (() => {}),
-        checkpoint() {
-          if (signal?.aborted) throw new Cancelled();
-        },
-      };
+      if (busy) return { kind: 'failed', reason: 'busy', detail: 'a Chat Record is already being made' };
+      busy = true;
       try {
-        run.checkpoint();
-        const outcome = request.kind === 'date-range' ? await recordDateRange(run, request) : await recordVisible(run);
-        run.checkpoint();
-        return outcome;
-      } catch (error) {
-        if (error instanceof Cancelled || signal?.aborted) return { kind: 'cancelled' };
-        return { kind: 'failed', reason: failureReason(error), detail: errorMessage(error) };
+        return await recordOnce(deps, request, options);
+      } finally {
+        busy = false;
       }
     },
   };
+}
+
+async function recordOnce(deps: Deps, request: ChatRecordRequest, options: RecordOptions): Promise<ChatRecordOutcome> {
+  const { signal } = options;
+  const run: Run = {
+    ...deps,
+    onProgress: options.onProgress ?? (() => {}),
+    checkpoint() {
+      if (signal?.aborted) throw new Cancelled();
+    },
+  };
+  try {
+    run.checkpoint();
+    const outcome = request.kind === 'date-range' ? await recordDateRange(run, request) : await recordVisible(run);
+    run.checkpoint();
+    return outcome;
+  } catch (error) {
+    if (error instanceof Cancelled || signal?.aborted) return { kind: 'cancelled' };
+    return { kind: 'failed', reason: failureReason(error), detail: errorMessage(error) };
+  }
 }
 
 async function recordVisible(run: Run): Promise<ChatRecordOutcome> {
