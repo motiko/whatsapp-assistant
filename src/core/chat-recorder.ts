@@ -3,7 +3,7 @@ import { contextBandText, withContextBand } from './context-band';
 import { localDayOf, type DaySpan, type LocalDay } from './day-span';
 import { chatRecordFileName } from './file-name';
 import { pdfOfImages } from './pdf';
-import { PageNotRecognisedError, type Rect, type WhatsAppPage } from './whatsapp-page';
+import { PageNotRecognisedError, type ChatItem, type Rect, type WhatsAppPage } from './whatsapp-page';
 
 /**
  * What to record:
@@ -289,10 +289,18 @@ async function recordDays(
   const first = start.divider;
 
   // Walk down one chat-area height at a time from the first day's divider.
-  // Content positions can shift between stops (WhatsApp Web loads older
-  // messages above), so everything is kept relative to the first divider
-  // ("record rows") and re-anchored on any divider captured before.
+  // Content positions shift between stops (WhatsApp Web keeps only a window
+  // of the list loaded, adding and dropping rows at either end), so
+  // everything is kept relative to the first divider ("record rows") and
+  // re-anchored at every stop on a row whose top has been captured.
   const dividerRows = new Map<LocalDay, number>([[first.day, 0]]);
+  /**
+   * The record rows of the tops of rows already captured, by `itemKey`. Only
+   * these are fixed points: a row further down may move when a long message
+   * above it is expanded, but everything above a captured top was expanded
+   * when it was on screen. The first divider is row 0 by definition.
+   */
+  const capturedTops = new Map<string, number>([[itemKey(first), 0]]);
   /** Record rows where a PDF page may start: the tops of messages and date dividers. */
   const pageBreaks = new Set<number>();
   let origin = first.top;
@@ -308,12 +316,7 @@ async function recordDays(
     if (stop >= maxScrollStops) throw new Error('WhatsApp Web did not stop scrolling');
     await expandReadMoreOnScreen(page, area.height);
     const items = page.loadedItems();
-    // Only a divider already captured is a fixed point: one seen further down
-    // may have moved since, when a long message above it was expanded.
-    const anchor = items.find(
-      (item) => item.kind === 'date-divider' && (dividerRows.get(item.day) ?? Infinity) <= covered,
-    );
-    if (anchor?.kind === 'date-divider') origin = anchor.top - dividerRows.get(anchor.day)!;
+    origin = anchoredOrigin(items, capturedTops);
 
     let day: LocalDay | undefined;
     for (const item of items) {
@@ -349,6 +352,10 @@ async function recordDays(
       covered = sliceTo;
       run.onProgress({ screensCaptured: slices.length, reachedDay: dayAt(dividerRows, covered - 1) });
     }
+    for (const item of items) {
+      const top = item.top - origin;
+      if (top >= 0 && top <= covered) capturedTops.set(itemKey(item), top);
+    }
     if (endKnown && covered >= end) break;
     if (atBottom) throw new Error('WhatsApp Web stopped scrolling before the end of the range');
     await page.scrollTo(origin + covered - captureOverlap);
@@ -379,6 +386,29 @@ async function expandReadMoreOnScreen(page: WhatsAppPage, height: number): Promi
   await page.expandReadMore({ top, bottom: top + height });
 }
 
+type DateDivider = Extract<ChatItem, { kind: 'date-divider' }>;
+
+/** Names a row of the message list, the same at every scroll stop. */
+function itemKey(item: ChatItem): string {
+  return item.kind === 'date-divider' ? `divider ${item.day}` : `message ${item.id}`;
+}
+
+/**
+ * The content position of record row 0 at this stop, from the loaded row
+ * nearest the screen whose top has been captured (`capturedTops`). Fails when
+ * WhatsApp Web no longer has any of them loaded, since the record could not
+ * then continue seamlessly.
+ */
+function anchoredOrigin(items: ChatItem[], capturedTops: Map<string, number>): number {
+  let anchor: { top: number; row: number } | undefined;
+  for (const item of items) {
+    const row = capturedTops.get(itemKey(item));
+    if (row !== undefined && (!anchor || row > anchor.row)) anchor = { top: item.top, row };
+  }
+  if (!anchor) throw new Error('WhatsApp Web no longer shows any part of the Chat Record captured so far');
+  return anchor.top - anchor.row;
+}
+
 /** The day of the latest known divider at or above `row`. */
 function dayAt(dividerRows: Map<LocalDay, number>, row: number): LocalDay {
   let best: { day: LocalDay; row: number } | undefined;
@@ -399,7 +429,7 @@ async function scrollToFirstDivider(
   run: Run,
   from: LocalDay,
   step: number,
-): Promise<{ divider: { day: LocalDay; top: number }; startReached: boolean } | undefined> {
+): Promise<{ divider: DateDivider; startReached: boolean } | undefined> {
   const { page } = run;
   let goingDown = false;
   let sawMessages = false;

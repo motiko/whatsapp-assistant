@@ -294,6 +294,61 @@ describe('Chat Record of a Date Range', () => {
   });
 });
 
+describe('a Date Range while WhatsApp Web slides its message list', () => {
+  /**
+   * A recorder of `chat` on a page that, like WhatsApp Web, keeps only
+   * `windowRows` rows in the message list and adds and drops rows at either
+   * end as it is scrolled, shifting content positions. The image reads back
+   * in Chat positions, which stay put.
+   */
+  function recorderWithSlidingList(chat: FakeChatDay[], windowRows: number) {
+    const page = createFakeWhatsAppPage({ chatName: 'Alice', chatArea, chat, windowRows });
+    return createChatRecorder({ page, camera: createFakeCamera({ viewport, page }) });
+  }
+
+  test('stitches a day several screens long with no gaps and no repeated rows', async () => {
+    const chat = [
+      { day: '2026-11-01', messageHeights: [100, 100, 100, 100, 100] },
+      // 2 Nov: its divider at 540, then 34 messages to 3980, about five screens.
+      { day: '2026-11-02', messageHeights: Array<number>(34).fill(100) },
+      { day: '2026-11-03', messageHeights: [100, 100, 100, 100, 100] },
+    ];
+    // 24 rows: about three and a half screens in the list at once.
+    const recorder = recorderWithSlidingList(chat, 24);
+
+    const outcome = await recorder.record({ kind: 'date-range', from: '2026-11-02', to: '2026-11-02' });
+
+    const image = await recordedImage(outcome);
+    expect(image.height).toBe(3440);
+    for (let row = 0; row < image.height; row++) {
+      expect(image.at(0, row)).toEqual({ x: 400, y: 540 + row });
+    }
+    expect(outcome).toMatchObject({ record: { span: { from: '2026-11-02', to: '2026-11-02' } } });
+  });
+
+  test('stitches several days when older rows are added above right after it scrolls to the first day', async () => {
+    // Days of a divider and twelve 100px messages (1240px), except 1 Nov,
+    // a divider and one message (140px). So 1 Nov starts at Chat position
+    // 3720, 2 Nov at 3860 and 4 Nov's last message ends at 7580.
+    const days = ['2026-10-29', '2026-10-30', '2026-10-31', '2026-11-01', '2026-11-02', '2026-11-03', '2026-11-04', '2026-11-05'];
+    const chat = days.map((day) => ({ day, messageHeights: Array<number>(day === '2026-11-01' ? 1 : 12).fill(100) }));
+    // With 20 rows in the list, 2 Nov's divider is found near the top of the
+    // list, so scrolling to it brings in older rows above (500px), and then
+    // 2 Nov's, 3 Nov's and 4 Nov's dividers drop out of the list in turn.
+    const recorder = recorderWithSlidingList(chat, 20);
+
+    const outcome = await recorder.record({ kind: 'date-range', from: '2026-11-02', to: '2026-11-04' });
+
+    const image = await recordedImage(outcome);
+    expect(image.height).toBe(3720);
+    // The fake Camera's pixels count Chat positions modulo 4096.
+    for (let row = 0; row < image.height; row++) {
+      expect(image.at(0, row)).toEqual({ x: 400, y: (3860 + row) % 4096 });
+    }
+    expect(outcome).toMatchObject({ record: { span: { from: '2026-11-02', to: '2026-11-04' } } });
+  });
+});
+
 describe('long messages behind "Read more" in a Date Range', () => {
   /**
    * A recorder of `chat`, and how many of its captures showed a message
