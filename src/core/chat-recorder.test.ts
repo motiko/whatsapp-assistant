@@ -293,6 +293,74 @@ describe('Chat Record of a Date Range', () => {
   });
 });
 
+describe('long messages behind "Read more" in a Date Range', () => {
+  /**
+   * A recorder of `chat`, and how many of its captures showed a message
+   * still cut short behind "Read more".
+   */
+  function recorderWatchingReadMore(chat: FakeChatDay[]) {
+    const page = createFakeWhatsAppPage({ chatName: 'Alice', chatArea, chat });
+    const screen = createFakeCamera({ viewport, page });
+    const watched = { capturesWithReadMore: 0 };
+    const camera = {
+      capture() {
+        if (page.readMoreOnScreen()) watched.capturesWithReadMore += 1;
+        return screen.capture();
+      },
+    };
+    return { recorder: createChatRecorder({ page, camera }), watched };
+  }
+
+  test('are shown in full: the record is as tall as the expanded messages and stitched without gaps', async () => {
+    const chat = [
+      { day: '2026-11-01', messageHeights: [100, 100, 100, 100, 100] },
+      // 2 Nov's divider is at 540. Its long message (1180-1280 cut short)
+      // straddles the bottom of the first screen (540-1218) and grows to 1180-1480.
+      { day: '2026-11-02', messageHeights: [100, 100, 100, 100, 100, 100, { truncated: 100, expanded: 300 }] },
+      // 3 Nov: 1480-2020 once 2 Nov's long message is expanded.
+      { day: '2026-11-03', messageHeights: [100, 100, 100, 100, 100] },
+      // 4 Nov's divider is at 2020 and its last message, the long one, ends at
+      // 2510 (2360 while cut short).
+      { day: '2026-11-04', messageHeights: [100, 100, { truncated: 100, expanded: 250 }] },
+      { day: '2026-11-05', messageHeights: [100, 100, 100, 100, 100] },
+    ];
+    const { recorder, watched } = recorderWatchingReadMore(chat);
+
+    const outcome = await recorder.record({ kind: 'date-range', from: '2026-11-02', to: '2026-11-04' });
+
+    expect(watched.capturesWithReadMore).toBe(0);
+    const image = await recordedImage(outcome);
+    expect(image.height).toBe(1970);
+    for (let row = 0; row < image.height; row++) {
+      expect(image.at(0, row)).toEqual({ x: 400, y: 540 + row });
+    }
+    expect(outcome).toMatchObject({ record: { span: { from: '2026-11-02', to: '2026-11-04' } } });
+  });
+
+  test('stay seamless when expanding one moves a later day\'s divider seen on an earlier screen', async () => {
+    const chat = [
+      // 1 Nov fills more than two screens: its divider (0-40) is long out of
+      // sight when its long message (1440-1540 cut short, 1440-1840 in full) is
+      // expanded, which moves 2 Nov's divider from 1540, where it was first
+      // seen, to 1840.
+      { day: '2026-11-01', messageHeights: [...Array<number>(14).fill(100), { truncated: 100, expanded: 400 }] },
+      // 2 Nov's messages end at 1840 + 40 + 300 = 2180.
+      { day: '2026-11-02', messageHeights: [100, 100, 100] },
+      { day: '2026-11-03', messageHeights: [100, 100, 100, 100, 100] },
+    ];
+    const { recorder, watched } = recorderWatchingReadMore(chat);
+
+    const outcome = await recorder.record({ kind: 'date-range', from: '2026-11-01', to: '2026-11-02' });
+
+    expect(watched.capturesWithReadMore).toBe(0);
+    const image = await recordedImage(outcome);
+    expect(image.height).toBe(2180);
+    for (let row = 0; row < image.height; row++) {
+      expect(image.at(0, row)).toEqual({ x: 400, y: row });
+    }
+  });
+});
+
 describe('Context Band and file name of a Date Range', () => {
   test('are built from the days actually captured, above the stitched WhatsApp pixels', async () => {
     // 4 and 5 Nov have no messages, so a 2-5 Nov range captures 2-3 Nov.
