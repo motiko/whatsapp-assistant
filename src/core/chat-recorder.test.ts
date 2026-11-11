@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { CaptureNotAllowedError } from './camera';
+import { CaptureNotAllowedError, type Camera } from './camera';
 import { createChatRecorder, type ChatRecordOutcome } from './chat-recorder';
 import { drawContextBand } from './context-band';
 import { PageNotRecognisedError, type WhatsAppPage } from './whatsapp-page';
@@ -575,6 +575,158 @@ describe('PDF pages', () => {
       [280, 369],
       [370, 449],
     ]);
+  });
+});
+
+describe('progress while a Date Range is recorded', () => {
+  test('is reported once per screen captured, with the day the Chat Record has reached', async () => {
+    const recorder = recorderFor(sixDays);
+    const progress: unknown[] = [];
+
+    await recorder.record(
+      { kind: 'date-range', from: '2026-11-02', to: '2026-11-04' },
+      { onProgress: (p) => progress.push(p) },
+    );
+
+    // 2-4 Nov is 1620px: three screens of a 678px chat area. The first screen
+    // shows 2 Nov and the start of 3 Nov, the second reaches 4 Nov.
+    expect(progress).toEqual([
+      { screensCaptured: 1, reachedDay: '2026-11-03' },
+      { screensCaptured: 2, reachedDay: '2026-11-04' },
+      { screensCaptured: 3, reachedDay: '2026-11-04' },
+    ]);
+  });
+});
+
+describe('one Chat Record at a time', () => {
+  test('refuses a second start while one is running, and the first still finishes', async () => {
+    const recorder = recorderFor(sixDays);
+    const range = { kind: 'date-range', from: '2026-11-02', to: '2026-11-04' } as const;
+
+    const first = recorder.record(range);
+    const second = await recorder.record(range);
+
+    expect(second).toMatchObject({ kind: 'failed', reason: 'busy' });
+    expect(await first).toMatchObject({ kind: 'record', record: { span: { from: '2026-11-02', to: '2026-11-04' } } });
+  });
+
+  test('can start again once the previous one has ended', async () => {
+    const recorder = recorderFor(sixDays);
+
+    await recorder.record({ kind: 'date-range', from: '2026-11-02', to: '2026-11-02' }, { signal: AbortSignal.abort() });
+    const again = await recorder.record({ kind: 'date-range', from: '2026-11-02', to: '2026-11-02' });
+
+    expect(again.kind).toBe('record');
+  });
+});
+
+describe('a Chat Record that fails part-way', () => {
+  test('fails with "page not recognised", producing nothing, when WhatsApp Web changes mid-walk', async () => {
+    const fake = createFakeWhatsAppPage({ chatName: 'Alice', chatArea, chat: sixDays });
+    let screens = 0;
+    const page: WhatsAppPage = {
+      ...fake,
+      loadedItems() {
+        if (screens >= 1) throw new PageNotRecognisedError('no message list');
+        return fake.loadedItems();
+      },
+    };
+    const recorder = createChatRecorder({ page, camera: createFakeCamera({ viewport, page }) });
+
+    const outcome = await recorder.record(
+      { kind: 'date-range', from: '2026-11-02', to: '2026-11-04' },
+      { onProgress: (p) => (screens = p.screensCaptured) },
+    );
+
+    expect(outcome).toEqual({
+      kind: 'failed',
+      reason: 'page-not-recognised',
+      detail: "WhatsApp Web's page was not recognised: no message list",
+    });
+  });
+
+  test('stops reporting progress after the Camera fails', async () => {
+    const page = createFakeWhatsAppPage({ chatName: 'Alice', chatArea, chat: sixDays });
+    const camera = createFakeCamera({ viewport, page, fails: new Error('Tab is hidden'), failsAfter: 1 });
+    const recorder = createChatRecorder({ page, camera });
+    const progress: number[] = [];
+
+    const outcome = await recorder.record(
+      { kind: 'date-range', from: '2026-11-02', to: '2026-11-04' },
+      { onProgress: (p) => progress.push(p.screensCaptured) },
+    );
+
+    expect(outcome).toEqual({ kind: 'failed', reason: 'capture-failed', detail: 'Tab is hidden' });
+    expect(progress).toEqual([1]);
+  });
+});
+
+/** A Camera that counts its captures. */
+function countingCamera(camera: Camera) {
+  const counted = { captures: 0, capture: () => camera.capture().finally(() => counted.captures++) };
+  return counted;
+}
+
+describe('cancelling a Chat Record', () => {
+  test('part-way stops capturing and produces nothing', async () => {
+    const page = createFakeWhatsAppPage({ chatName: 'Alice', chatArea, chat: sixDays });
+    const camera = countingCamera(createFakeCamera({ viewport, page }));
+    const recorder = createChatRecorder({ page, camera });
+    const cancel = new AbortController();
+
+    const outcome = await recorder.record(
+      { kind: 'date-range', from: '2026-11-02', to: '2026-11-04' },
+      { signal: cancel.signal, onProgress: ({ screensCaptured }) => screensCaptured === 1 && cancel.abort() },
+    );
+
+    expect(outcome).toEqual({ kind: 'cancelled' });
+    expect(camera.captures).toBe(1); // a whole record takes three
+  });
+
+  test('while scrolling to the first day captures nothing', async () => {
+    const fake = createFakeWhatsAppPage({ chatName: 'Alice', chatArea, chat: sixDays });
+    const cancel = new AbortController();
+    const page: WhatsAppPage = {
+      ...fake,
+      async scrollTo(top) {
+        await fake.scrollTo(top);
+        cancel.abort();
+      },
+    };
+    const camera = countingCamera(createFakeCamera({ viewport, page }));
+    const recorder = createChatRecorder({ page, camera });
+
+    const outcome = await recorder.record(
+      { kind: 'date-range', from: '2026-11-01', to: '2026-11-02' },
+      { signal: cancel.signal },
+    );
+
+    expect(outcome).toEqual({ kind: 'cancelled' });
+    expect(camera.captures).toBe(0);
+  });
+
+  test('after the last screen of a Chat Record long enough for a PDF produces no PDF', async () => {
+    const recorder = smallScreenRecorderFor(twoHundredPixelDays(6));
+    const cancel = new AbortController();
+
+    // Six 200px days: 1200px, more than ten 100px chat areas. Cancel as the last day is reached.
+    const outcome = await recorder.record(
+      { kind: 'date-range', from: '2026-11-01', to: '2026-11-06' },
+      { signal: cancel.signal, onProgress: ({ reachedDay }) => reachedDay === '2026-11-06' && cancel.abort() },
+    );
+
+    expect(outcome).toEqual({ kind: 'cancelled' });
+  });
+
+  test('before it starts captures nothing', async () => {
+    const page = createFakeWhatsAppPage({ chatName: 'Alice', chatArea, chat: sixDays });
+    const camera = countingCamera(createFakeCamera({ viewport, page }));
+    const recorder = createChatRecorder({ page, camera });
+
+    const outcome = await recorder.record({ kind: 'visible' }, { signal: AbortSignal.abort() });
+
+    expect(outcome).toEqual({ kind: 'cancelled' });
+    expect(camera.captures).toBe(0);
   });
 });
 
