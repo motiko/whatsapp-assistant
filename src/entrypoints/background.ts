@@ -1,12 +1,10 @@
-import {
-  isCaptureVisibleTabRequest,
-  type CaptureVisibleTabResponse,
-  type OpenPanelRequest,
-} from '../extension/messages';
+import { serveCaptureSessions } from '../extension/capture-sessions';
+import type { OpenPanelRequest } from '../extension/messages';
 
 /**
  * The background worker does the one thing a content script cannot:
- * capture the visible tab. It never stores or sends what it captures.
+ * capture the tab (through Chrome's debugger, see docs/adr/0004). It never
+ * stores or sends what it captures.
  */
 export default defineBackground(() => {
   // Let the content script keep pending Continuations (ids and dates only) in
@@ -17,14 +15,9 @@ export default defineBackground(() => {
   chrome.runtime.onStartup.addListener(shareSessionStorage);
   chrome.runtime.onInstalled.addListener(shareSessionStorage);
 
-  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    if (!isCaptureVisibleTabRequest(message)) return false;
-    captureSenderTab(sender).then(sendResponse);
-    return true; // responds asynchronously
-  });
+  serveCaptureSessions();
 
-  // Clicking the toolbar icon grants `activeTab` for this tab (which capture
-  // needs) and opens the panel.
+  // Clicking the toolbar icon opens the panel (a shortcut; the header button does too).
   chrome.action.onClicked.addListener((tab) => {
     if (tab.id === undefined) return;
     const request: OpenPanelRequest = { type: 'open-panel' };
@@ -33,22 +26,3 @@ export default defineBackground(() => {
     });
   });
 });
-
-async function captureSenderTab(sender: chrome.runtime.MessageSender): Promise<CaptureVisibleTabResponse> {
-  const tab = sender.tab;
-  if (tab?.id === undefined) return { ok: false, notAllowed: false, error: 'No tab to capture.' };
-  try {
-    // captureVisibleTab captures whichever tab is active in the window, so
-    // refuse unless that is still the WhatsApp tab that asked.
-    const current = await chrome.tabs.get(tab.id);
-    if (!current.active) {
-      return { ok: false, notAllowed: false, error: 'The WhatsApp tab is not the visible tab.' };
-    }
-    const dataUrl = await chrome.tabs.captureVisibleTab(current.windowId, { format: 'png' });
-    return { ok: true, dataUrl };
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    const notAllowed = /activeTab|<all_urls>|permission/i.test(message);
-    return { ok: false, notAllowed, error: message };
-  }
-}
