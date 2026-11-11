@@ -534,7 +534,7 @@ describe('PDF pages', () => {
     for (const { messageHeights } of chat) {
       for (const height of [40, ...messageHeights]) {
         tops.add(y);
-        y += height;
+        y += typeof height === 'number' ? height : height.expanded;
       }
     }
     return tops;
