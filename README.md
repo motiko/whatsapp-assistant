@@ -6,12 +6,14 @@ A personal Chrome extension that runs on [WhatsApp Web](https://web.whatsapp.com
 
 Current state ([#2](https://github.com/motiko/whatsapp-assistant/issues/2) walking skeleton,
 [#5](https://github.com/motiko/whatsapp-assistant/issues/5) Date Ranges,
-[#6](https://github.com/motiko/whatsapp-assistant/issues/6) Context Band, file name and Download):
+[#6](https://github.com/motiko/whatsapp-assistant/issues/6) Context Band, file name and Download,
+[#4](https://github.com/motiko/whatsapp-assistant/issues/4) progress, Cancel and failure handling):
 a button in the open Chat's header opens a panel where you pick a **Date Range** (From/To pickers
 or the Today, Last 7 days and Last 30 days presets). **Create Chat Record** scrolls the Chat to the
 range itself, captures as many screens as needed and copies them, stitched, to the clipboard as one
-PNG, with a **Context Band** above it; a **Download** button saves the same PNG. Full Chat,
-"Read more" expansion, progress and Cancel, and PDF output come in later tickets of
+PNG, with a **Context Band** above it; a **Download** button saves the same PNG. While it runs the
+panel shows progress and **Cancel**, and WhatsApp Web is locked against clicks. Full Chat,
+"Read more" expansion and PDF output come in later tickets of
 [#1](https://github.com/motiko/whatsapp-assistant/issues/1).
 
 ## Requirements
@@ -59,6 +61,15 @@ navigated away, and also opens the panel. If you skip it, the panel tells you to
    divider to the bottom of the last message of the last day, cropped to the chat area (no Chat
    list, header, message box, scrollbar or extension UI). A range with no messages says
    "No messages between X and Y" and copies nothing.
+
+   While it runs, the panel shows how many screens it has captured and the day it has reached,
+   reminds you to keep the tab visible, and offers **Cancel** (which stops it and copies nothing).
+   WhatsApp Web is dimmed and locked against clicks and scrolling until it ends, and the panel
+   can't be closed. The lock, panel and button are made invisible for each capture, so they are
+   never in the Chat Record. Only one Chat Record runs at a time. If you switch to another tab or
+   minimise the window part-way, the Chat Record fails and nothing is copied (Chrome stops painting
+   a hidden tab, so you see the message when you come back). If WhatsApp Web's page stops looking
+   as expected part-way, it fails with "page wasn't recognised" and nothing is copied.
 5. Above the messages, in a separate white strip (the Context Band), are the Chat's name, the days
    the Chat Record actually covers (the first and last day with messages in the range, which can be
    narrower than the range you picked) and when it was taken (local time and UTC offset).
@@ -87,6 +98,11 @@ Tests sit at two seams (see the spec's Testing Decisions in
   builder (`src/core/file-name.test.ts`) is also tested directly.
 - **Date Range fields** (`src/ui/date-range-fields.test.ts`): pickers, presets and validation,
   driven through the DOM with a fixed "today".
+- **Panel while recording** (`src/ui/record-panel.test.ts`): progress text, Cancel, the notice, the
+  lock over WhatsApp Web, and that `hide()` makes all of it invisible for captures, driven through the
+  DOM with a scripted `createChatRecord`.
+- **Hidden-tab guard** (`src/extension/visible-tab-camera.test.ts`): captures fail once the tab has
+  been hidden during a Chat Record (visibility faked through `visibilitychange`).
 - **WhatsApp Web adapter** (`src/whatsapp-web/*.test.ts`): run against page snapshots in
   `src/whatsapp-web/fixtures/`, rendered in a real 1280x800 frame. **These snapshots are currently
   synthetic** (hand-written to resemble WhatsApp Web); see
@@ -97,15 +113,15 @@ Tests sit at two seams (see the spec's Testing Decisions in
 
 | Path | Module |
 | --- | --- |
-| `src/core/chat-recorder.ts` | **Chat Recorder**: request (a Date Range, or the visible chat area) in, outcome out (a Chat Record, *no messages*, or *failed* with a reason). Range resolution, the scroll-and-capture loop, cropping, stitching and adding the Context Band. No Chrome or WhatsApp knowledge. |
+| `src/core/chat-recorder.ts` | **Chat Recorder**: request (a Date Range, or the visible chat area) plus optional `onProgress` and cancel `signal` in, outcome out (a Chat Record, *no messages*, *cancelled*, or *failed* with a reason, including *busy* while another runs). Range resolution, the scroll-and-capture loop, cropping, stitching and adding the Context Band. No Chrome or WhatsApp knowledge. |
 | `src/core/context-band.ts` | **Context Band**: its text (with optional extra lines) and drawing it above an image, or on its own |
 | `src/core/file-name.ts` | The file name a Chat Record is saved under, safe for every OS and Chrome's downloads |
 | `src/core/day-span.ts` | Local days (ISO `YYYY-MM-DD`) and the span of days a Chat Record covers |
 | `src/core/whatsapp-page.ts` | **WhatsApp Page** interface (Chat name, chat area, scroll position/height, scrolling, loaded date dividers and messages) and `PageNotRecognisedError` |
 | `src/core/camera.ts` | **Camera** interface (visible-tab bitmap + device pixel ratio) and `CaptureNotAllowedError` |
 | `src/whatsapp-web/` | **WhatsApp Web adapter**: the only code that knows WhatsApp Web's page. All selectors are in `selectors.ts`; reading divider labels ("Today", weekdays, locale dates) is in `divider-dates.ts`. |
-| `src/extension/` | Chrome-side pieces: the tab Camera, clipboard and download output, messages to the background worker |
-| `src/ui/record-panel.ts` | Header button and panel |
+| `src/extension/` | Chrome-side pieces: the tab Camera (paced, hides own UI), the hidden-tab guard around it (`visible-tab-camera.ts`), clipboard and download output, messages to the background worker |
+| `src/ui/record-panel.ts` | Header button and panel, including progress, Cancel and the lock over WhatsApp Web while recording |
 | `src/ui/date-range-fields.ts` | The panel's From/To pickers, presets and validation |
 | `src/entrypoints/` | WXT entry points: content script (wiring) and background worker (tab capture) |
 
@@ -169,3 +185,22 @@ Needs a logged-in WhatsApp Web, so it is not automated. Use a fresh `npm run bui
 - [ ] After creating, the panel says the Chat Record was copied and shows **Download PNG**. Click it: the file appears in your Downloads folder as `Chat history - <name> - <from> to <to>.png`, and the panel says it was downloaded under that name.
 - [ ] Download in a Chat whose name has `/`, `:` or emoji (including a joined one such as 👨‍👩‍👧 or a flag): the file saves; `/` and `:` show as `_`, emoji are kept (a joined emoji appears as its parts, e.g. 👨👩👧).
 - [ ] Close and reopen the panel: **Download PNG** is gone until a new Chat Record is made.
+
+## Manual smoke checklist (progress, Cancel and failures, [#4](https://github.com/motiko/whatsapp-assistant/issues/4))
+
+- [ ] Start a long Date Range (10+ screens): the panel shows "N screens captured, up to <day>…", counting up
+      with the day moving forward; a yellow notice says to keep the tab visible; a **Cancel** button shows; the
+      close button is disabled and Escape or clicking outside doesn't close the panel.
+- [ ] While it runs, WhatsApp Web is dimmed; clicking a message, another Chat in the Chat list, or scrolling
+      the chat with the mouse wheel or trackpad does nothing.
+- [ ] Paste the result: no dimming, panel, progress text, notice or button anywhere in the image.
+- [ ] Click **Cancel** part-way: within about a second the Chat stops scrolling, the panel says
+      "Cancelled. No Chat Record was made.", the clipboard still holds what it held before, WhatsApp Web is
+      no longer dimmed and can be scrolled and clicked, and **Create Chat Record** works again.
+- [ ] Start a long run and switch to another tab for a few seconds, then back: the panel says the screen
+      couldn't be captured because the WhatsApp tab was hidden, and nothing was copied. Repeat by minimising
+      the window.
+- [ ] While one runs, click the toolbar icon (reopens the panel): it keeps showing progress and doesn't let you
+      start a second Chat Record.
+- [ ] Reload WhatsApp Web part-way: the run stops, nothing is copied, and after the reload the button and panel
+      work again (click the toolbar icon again first, see "Allowing capture").
