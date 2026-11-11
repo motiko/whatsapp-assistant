@@ -66,9 +66,9 @@ export function createFakeWhatsAppPage(options: {
     for (const { day, messageHeights } of chat) {
       items.push({ kind: 'date-divider', day, top: y, bottom: y + fakeDividerHeight });
       y += fakeDividerHeight;
-      for (const message of messageHeights) {
+      for (const [index, message] of messageHeights.entries()) {
         const height = typeof message === 'number' ? message : expanded.has(message) ? message.expanded : message.truncated;
-        const item: ChatItem = { kind: 'message', top: y, bottom: y + height };
+        const item: ChatItem = { kind: 'message', id: `${day} #${index + 1}`, top: y, bottom: y + height };
         items.push(item);
         if (typeof message !== 'number' && !expanded.has(message)) truncatedRows.set(item, message);
         y += height;

@@ -62,8 +62,11 @@ export function createWhatsAppWebPage(doc: Document, options: WhatsAppWebPageOpt
       const now = today();
       const items: ChatItem[] = [];
       for (const { row, span } of listRows(doc)) {
-        if (row.querySelector(selectors.message)) {
-          items.push({ kind: 'message', ...span });
+        const message = row.querySelector(selectors.message);
+        if (message) {
+          const id = message.getAttribute('data-id');
+          if (!id) throw new PageNotRecognisedError('a message without its id (data-id)');
+          items.push({ kind: 'message', id, ...span });
           continue;
         }
         const day = readDividerDay(row.textContent?.trim() ?? '', now, locale);

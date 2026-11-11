@@ -66,7 +66,12 @@ export type OlderMessages = 'loaded' | 'no-older-messages';
 export type ChatItem =
   /** WhatsApp Web's date divider: every message below it, up to the next divider, is from `day`. */
   | { kind: 'date-divider'; day: LocalDay; top: number; bottom: number }
-  | { kind: 'message'; top: number; bottom: number };
+  /**
+   * A message. `id` is WhatsApp Web's own name for it (`data-id`): it stays
+   * the same while the message is loaded, unloaded and loaded again, so the
+   * same message can be recognised at another scroll stop.
+   */
+  | { kind: 'message'; id: string; top: number; bottom: number };
 
 /** A rectangle in CSS pixels. */
 export interface Rect {
