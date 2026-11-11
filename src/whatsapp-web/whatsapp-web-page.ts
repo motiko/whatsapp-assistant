@@ -154,11 +154,12 @@ function oldestMessage(doc: Document): string | undefined {
   return list.querySelector(selectors.message)?.getAttribute('data-id') ?? undefined;
 }
 
-/** Polls `condition` each frame for up to `waitMs`; resolves whether it became true. */
+/** Polls `condition` each frame (or `frameFallbackMs`) for up to `waitMs`; resolves whether it became true. */
 async function waitFor(view: Window, condition: () => boolean, waitMs: number): Promise<boolean> {
   const deadline = view.performance.now() + waitMs;
   for (;;) {
-    await new Promise((resolve) => view.requestAnimationFrame(() => view.setTimeout(resolve, 10)));
+    await nextFrame(view);
+    await new Promise((resolve) => view.setTimeout(resolve, 10));
     if (condition()) return true;
     if (view.performance.now() >= deadline) return false;
   }
@@ -181,10 +182,32 @@ function olderMessagesPrompt(doc: Document): HTMLElement | undefined {
 async function settle(view: Window, scroller: HTMLElement, settleMs: number): Promise<void> {
   for (let round = 0; round < 20; round++) {
     const height = scroller.scrollHeight;
-    await new Promise((resolve) => view.requestAnimationFrame(() => view.requestAnimationFrame(resolve)));
+    await nextFrame(view);
+    await nextFrame(view);
     if (settleMs > 0) await new Promise((resolve) => view.setTimeout(resolve, settleMs));
     if (scroller.scrollHeight === height) return;
   }
+}
+
+/**
+ * How long to wait for an animation frame before going on without one.
+ * Chrome runs no animation frames in a hidden tab (the extension keeps the
+ * WhatsApp tab "visible" while it records, but if that fails, waits must
+ * still end); timers there run about once a second.
+ */
+const frameFallbackMs = 100;
+
+/** Resolves at the next animation frame, or after `frameFallbackMs` if none comes. */
+function nextFrame(view: Window): Promise<void> {
+  return new Promise((resolve) => {
+    const done = () => {
+      view.cancelAnimationFrame(frame);
+      view.clearTimeout(timer);
+      resolve();
+    };
+    const frame = view.requestAnimationFrame(done);
+    const timer = view.setTimeout(done, frameFallbackMs);
+  });
 }
 
 /**

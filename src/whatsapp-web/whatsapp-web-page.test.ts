@@ -274,3 +274,29 @@ describe('WhatsApp Web adapter on a page it does not recognise', () => {
     expect(() => page.scrollTop()).toThrow(PageNotRecognisedError);
   });
 });
+
+describe('WhatsApp Web adapter in a tab that paints no frames', () => {
+  // Chrome runs no animation frames in a background tab; scrolling and
+  // waiting must still finish there.
+  const options = { today: () => new Date(2026, 10, 11, 15, 30), locale: 'en-GB', settleMs: 0, olderMessagesWaitMs: 100 };
+
+  async function backgroundTab(html: string) {
+    const doc = await loadSnapshot(html);
+    doc.defaultView!.requestAnimationFrame = () => 0;
+    return doc;
+  }
+
+  test('still scrolls and settles', async () => {
+    const page = createWhatsAppWebPage(await backgroundTab(multiDayChat), options);
+
+    await page.scrollTo(500);
+
+    expect(page.scrollTop()).toBe(500);
+  });
+
+  test('still finds out that no older messages are available', async () => {
+    const page = createWhatsAppWebPage(await backgroundTab(multiDayChat), options);
+
+    await expect(page.loadOlder()).resolves.toBe('no-older-messages');
+  });
+});
