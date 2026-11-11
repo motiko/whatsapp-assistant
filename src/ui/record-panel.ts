@@ -1,7 +1,12 @@
 import type { FailureReason } from '../core/chat-recorder';
+import type { LocalDay } from '../core/whatsapp-page';
+import { createDateRangeFields, dateRangeFieldsStyles, type DateRange } from './date-range-fields';
 
 /** What became of a click on Create Chat Record. */
-export type CreateResult = { kind: 'copied' } | { kind: 'failed'; reason: FailureReason | 'clipboard-failed'; detail: string };
+export type CreateResult =
+  | { kind: 'copied' }
+  | { kind: 'no-messages'; from: LocalDay; to: LocalDay }
+  | { kind: 'failed'; reason: FailureReason | 'clipboard-failed'; detail: string };
 
 export interface RecordPanel {
   /** The header button; place it with `keepInChatHeader`. */
@@ -13,7 +18,8 @@ export interface RecordPanel {
 
 /**
  * The header button and the small panel it opens. The panel shows which Chat
- * the Chat Record will be of, a Create Chat Record button, and the result.
+ * the Chat Record will be of, the Date Range fields, a Create Chat Record
+ * button, and the result.
  */
 export function createRecordPanel(
   doc: Document,
@@ -21,7 +27,7 @@ export function createRecordPanel(
     /** The open Chat's name, or undefined if it cannot be read. */
     chatName: () => string | undefined;
     /** Must start any clipboard write synchronously (see `copyPngToClipboard`). */
-    createChatRecord: () => Promise<CreateResult>;
+    createChatRecord: (range: DateRange) => Promise<CreateResult>;
   },
 ): RecordPanel {
   const buttonHost = doc.createElement('whatsapp-assistant-button');
@@ -32,11 +38,12 @@ export function createRecordPanel(
 
   const panelHost = doc.createElement('whatsapp-assistant-panel');
   const panelRoot = panelHost.attachShadow({ mode: 'open' });
-  panelRoot.innerHTML = `<style>${panelStyles}</style>
+  panelRoot.innerHTML = `<style>${panelStyles}${dateRangeFieldsStyles}</style>
     <section role="dialog" aria-labelledby="title" hidden>
       <header><h2 id="title">Chat Record</h2><button type="button" class="close" aria-label="Close">×</button></header>
       <p class="chat">Chat: <strong></strong></p>
-      <p class="hint">Copies the messages on screen to the clipboard as an image.</p>
+      <div class="range"></div>
+      <p class="hint">Copies the messages of these days to the clipboard as an image. Keep this tab visible and leave it alone until it's done.</p>
       <button type="button" class="create">Create Chat Record</button>
       <p class="status" role="status" aria-live="polite"></p>
     </section>`;
@@ -44,6 +51,13 @@ export function createRecordPanel(
   const chatLabel = panelRoot.querySelector('.chat strong')!;
   const createButton = panelRoot.querySelector<HTMLButtonElement>('.create')!;
   const status = panelRoot.querySelector<HTMLElement>('.status')!;
+  let busy = false;
+  const updateCreateButton = () => {
+    createButton.disabled = busy || 'error' in dateRange.value();
+  };
+  const dateRange = createDateRangeFields(panelRoot.querySelector<HTMLElement>('.range')!, {
+    onChange: updateCreateButton,
+  });
   doc.body.append(panelHost);
 
   const open = () => {
@@ -51,9 +65,11 @@ export function createRecordPanel(
     chatLabel.textContent = options.chatName() ?? 'unknown';
     status.textContent = '';
     status.className = 'status';
+    dateRange.refresh();
+    updateCreateButton();
     dialog.hidden = false;
     position();
-    createButton.focus();
+    panelRoot.querySelector<HTMLInputElement>('input')!.focus();
   };
   const close = () => {
     dialog.hidden = true;
@@ -81,16 +97,21 @@ export function createRecordPanel(
   });
 
   createButton.addEventListener('click', () => {
-    createButton.disabled = true;
+    const chosen = dateRange.value();
+    if (!('range' in chosen)) return;
+    busy = true;
+    updateCreateButton();
     show('Making the Chat Record…', 'working');
     options
-      .createChatRecord()
+      .createChatRecord(chosen.range)
       .then((result) => {
         if (result.kind === 'copied') show('Chat Record copied to the clipboard as a PNG.', 'done');
+        else if (result.kind === 'no-messages') show(noMessagesText(result.from, result.to), 'error');
         else show(failureMessage(result.reason, result.detail), 'error');
       })
       .finally(() => {
-        createButton.disabled = false;
+        busy = false;
+        updateCreateButton();
       });
   });
 
@@ -106,6 +127,16 @@ export function createRecordPanel(
       };
     },
   };
+}
+
+function noMessagesText(from: LocalDay, to: LocalDay): string {
+  const format = (day: LocalDay) => {
+    const [year, month, date] = day.split('-').map(Number);
+    return new Date(year!, month! - 1, date).toLocaleDateString(undefined, { dateStyle: 'medium' });
+  };
+  return from === to
+    ? `No messages on ${format(from)}. Nothing was copied.`
+    : `No messages between ${format(from)} and ${format(to)}. Nothing was copied.`;
 }
 
 function failureMessage(reason: Extract<CreateResult, { kind: 'failed' }>['reason'], detail: string): string {
@@ -134,7 +165,7 @@ const buttonStyles = `
 `;
 
 const panelStyles = `
-  section { position: fixed; z-index: 2147483647; width: 300px; box-sizing: border-box; padding: 14px 16px 16px;
+  section { position: fixed; z-index: 2147483647; width: 320px; box-sizing: border-box; padding: 14px 16px 16px;
     background: #fff; color: #111b21; border-radius: 10px; box-shadow: 0 6px 24px rgba(11, 20, 26, .25);
     font: 14px/1.4 "Segoe UI", Helvetica, Arial, sans-serif; }
   :host-context(body.dark) section { background: #233138; color: #e9edef; }
