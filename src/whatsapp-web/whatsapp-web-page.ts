@@ -164,13 +164,15 @@ async function waitFor(view: Window, condition: () => boolean, waitMs: number): 
   }
 }
 
-/** WhatsApp Web's "get older messages from your phone" prompt, if it shows one. */
+/**
+ * WhatsApp Web's "get older messages from your phone" prompt, if it shows one.
+ * On the real page it is a button above the message list, inside the
+ * scroller; it is looked for anywhere in the scroller except inside messages.
+ */
 function olderMessagesPrompt(doc: Document): HTMLElement | undefined {
-  for (const row of messageList(doc).children) {
-    if (row.querySelector(selectors.message)) continue;
-    for (const button of row.querySelectorAll<HTMLElement>(selectors.rowButton)) {
-      if (olderMessagesPromptText.test(button.textContent ?? '')) return button;
-    }
+  for (const button of messageScroller(doc).querySelectorAll<HTMLElement>(selectors.promptButton)) {
+    if (button.closest(selectors.message)) continue;
+    if (olderMessagesPromptText.test(button.textContent ?? '')) return button;
   }
   return undefined;
 }

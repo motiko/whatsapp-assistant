@@ -31,11 +31,12 @@ export const selectors = {
   /** The "Read more" button inside a message WhatsApp Web shows cut short. */
   readMore: '.read-more-button',
   /**
-   * Clickable elements in a message-list item that is not a message; one whose
-   * text matches `olderMessagesPromptText` is the prompt to get older
-   * messages from the phone. (Unverified against the real page.)
+   * Clickable elements in the message scroller; one whose text matches
+   * `olderMessagesPromptText` is the prompt to get older messages from the
+   * phone. On the real page it is a <button> above the message list, not an
+   * item in it (checked Nov 2026).
    */
-  rowButton: '[role="button"], button',
+  promptButton: 'button, [role="button"]',
 } as const;
 
 /**

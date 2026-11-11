@@ -225,11 +225,11 @@ describe('WhatsApp Web adapter loading older messages', () => {
   test('clicks the prompt to get older messages from the phone, and loads what arrives', async () => {
     const doc = await loadSnapshot(olderMessagesOnPhone);
     const page = createWhatsAppWebPage(doc, options);
-    const prompt = doc.querySelector<HTMLElement>('._ahmw [role="button"]')!;
+    const prompt = doc.querySelector<HTMLElement>('._ahmw button')!;
     let clicks = 0;
     prompt.addEventListener('click', () => {
       clicks++;
-      prompt.closest('._ahmw')!.parentElement!.remove();
+      prompt.closest('._ahmw')!.remove();
       addOlderDayLater(doc);
     });
 
@@ -244,7 +244,7 @@ describe('WhatsApp Web adapter loading older messages', () => {
     const doc = await loadSnapshot(olderMessagesOnPhone);
     const page = createWhatsAppWebPage(doc, options);
     let clicks = 0;
-    doc.querySelector('._ahmw [role="button"]')!.addEventListener('click', () => clicks++);
+    doc.querySelector('._ahmw button')!.addEventListener('click', () => clicks++);
 
     const result = await page.loadOlder();
 
