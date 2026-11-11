@@ -1,5 +1,6 @@
 import type { Camera } from '../camera';
 import type { WhatsAppPage } from '../whatsapp-page';
+import type { FakeWhatsAppPage } from './fake-whatsapp-page';
 
 /**
  * A Camera that "captures" a generated screen in which every pixel encodes
@@ -10,8 +11,9 @@ import type { WhatsAppPage } from '../whatsapp-page';
  * pixels. When a `page` is given, a pixel inside its chat area encodes its
  * screen x and its position in the scrolled message list instead:
  * y = the content position (in device pixels) shown there at the moment of
- * capture. Stitched captures of a scrolled Chat therefore read back as one
- * continuous run of content rows.
+ * capture (for a fake WhatsApp Page, the Chat position, which stays put when
+ * WhatsApp Web shifts the message list). Stitched captures of a scrolled Chat
+ * therefore read back as one continuous run of rows.
  *
  * Encoding: R = x & 0xff, G = y & 0xff, B = (x >> 8) << 4 | (y >> 8).
  * Positions are exact up to 4095 device pixels in each direction.
@@ -19,8 +21,11 @@ import type { WhatsAppPage } from '../whatsapp-page';
 export function createFakeCamera(options: {
   viewport: { width: number; height: number };
   devicePixelRatio?: number;
-  /** The page on screen; its chat area shows the message list at its current scroll position. */
-  page?: WhatsAppPage;
+  /**
+   * The page on screen; its chat area shows the message list at its current
+   * scroll position (at its `chatPositionShown`, for a fake WhatsApp Page).
+   */
+  page?: WhatsAppPage | FakeWhatsAppPage;
   /** Every capture rejects with this error (after `failsAfter` successful captures, if given). */
   fails?: Error;
   failsAfter?: number;
@@ -34,7 +39,8 @@ export function createFakeCamera(options: {
       const width = Math.round(options.viewport.width * devicePixelRatio);
       const height = Math.round(options.viewport.height * devicePixelRatio);
       const area = options.page?.chatArea();
-      const scrollTop = options.page?.scrollTop() ?? 0;
+      const page = options.page;
+      const scrollTop = page ? ('chatPositionShown' in page ? page.chatPositionShown() : page.scrollTop()) : 0;
       const inArea = (x: number, y: number) =>
         area !== undefined &&
         x >= area.left * devicePixelRatio &&
