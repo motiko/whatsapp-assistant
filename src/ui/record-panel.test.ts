@@ -71,12 +71,17 @@ describe('the panel while a Chat Record is being made', () => {
     expect(status()).toContain(new Date(2026, 10, 4).toLocaleDateString(undefined, { dateStyle: 'medium' }));
   });
 
-  test('tells the user to keep the tab visible and leave it alone', () => {
+  test("tells the user they may switch tabs, to leave WhatsApp alone, and to expect Chrome's debugging bar", () => {
     const { start, root } = render();
 
     start();
 
-    expect(root.textContent).toContain("Keep this tab visible and don't scroll or click in WhatsApp");
+    const notice = root.querySelector('.notice')!;
+    expect(notice.checkVisibility()).toBe(true);
+    expect(notice.textContent).toBe(
+      "You can switch to other tabs meanwhile. Don't scroll or click in WhatsApp, and don't cancel Chrome's “started debugging this browser” bar, until the Chat Record is done.",
+    );
+    expect(root.textContent).not.toContain('Keep this tab visible');
   });
 
   test('locks WhatsApp Web against clicks until the Chat Record is done', async () => {
@@ -131,11 +136,21 @@ describe('the panel while a Chat Record is being made', () => {
     const { start, status, settle } = render();
     const run = start();
 
-    run.finish({ kind: 'failed', reason: 'capture-failed', detail: 'The WhatsApp tab was hidden while the Chat Record was being made' });
+    run.finish({ kind: 'failed', reason: 'capture-failed', detail: 'the WhatsApp tab was closed or reloaded' });
+    await settle();
+
+    expect(status()).toBe("The screen couldn't be captured (the WhatsApp tab was closed or reloaded). Nothing was copied.");
+  });
+
+  test("says why when Chrome doesn't let the extension capture the tab, without asking for a toolbar click", async () => {
+    const { start, status, settle } = render();
+    const run = start();
+
+    run.finish({ kind: 'failed', reason: 'capture-not-allowed', detail: 'Another debugger is already attached to the tab' });
     await settle();
 
     expect(status()).toBe(
-      "The screen couldn't be captured (The WhatsApp tab was hidden while the Chat Record was being made). Nothing was copied.",
+      "Chrome didn't let this extension capture this tab (Another debugger is already attached to the tab). Nothing was copied.",
     );
   });
 });

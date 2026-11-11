@@ -28,8 +28,8 @@ export interface Screenshot {
 }
 
 /**
- * Chrome refused to capture the tab because the extension has not been given
- * access to it yet (see the README: capture needs the `activeTab` grant).
+ * Chrome refused to let the extension capture the tab (for example it could
+ * not attach its debugger to it; see docs/adr/0004).
  */
 export class CaptureNotAllowedError extends Error {
   constructor(detail: string) {

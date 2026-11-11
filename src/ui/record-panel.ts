@@ -98,9 +98,9 @@ export function createRecordPanel(
       <button type="button" class="continue" aria-pressed="false" hidden></button>
       <p class="continue-note" hidden></p>
       <div class="range"></div>
-      <p class="hint">Copies the messages of these days to the clipboard as an image, with a band above them naming the Chat, the days and when it was taken. More than about ten screens of messages download as a PDF instead. Keep this tab visible and leave it alone until it's done.</p>
+      <p class="hint">Copies the messages of these days to the clipboard as an image, with a band above them naming the Chat, the days and when it was taken. More than about ten screens of messages download as a PDF instead. You can switch to other tabs while it runs.</p>
       <button type="button" class="create">Create Chat Record</button>
-      <p class="notice" hidden>Keep this tab visible and don't scroll or click in WhatsApp until the Chat Record is done.</p>
+      <p class="notice" hidden>You can switch to other tabs meanwhile. Don't scroll or click in WhatsApp, and don't cancel Chrome's “started debugging this browser” bar, until the Chat Record is done.</p>
       <p class="status" role="status" aria-live="polite"></p>
       <button type="button" class="cancel" hidden>Cancel</button>
       <button type="button" class="download" hidden>Download PNG</button>
@@ -398,7 +398,7 @@ function failureMessage(reason: Extract<CreateResult, { kind: 'failed' }>['reaso
     case 'page-not-recognised':
       return "WhatsApp Web's page wasn't recognised, so no Chat Record was made. The extension probably needs an update for a WhatsApp change.";
     case 'capture-not-allowed':
-      return "Chrome hasn't allowed this extension to capture this tab yet. Click the WhatsApp Assistant icon in Chrome's toolbar once, then try again.";
+      return `Chrome didn't let this extension capture this tab (${detail}). Nothing was copied.`;
     case 'capture-failed':
       return `The screen couldn't be captured (${detail}). Nothing was copied.`;
     case 'busy':

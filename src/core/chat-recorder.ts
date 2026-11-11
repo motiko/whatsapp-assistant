@@ -103,9 +103,9 @@ export type ChatRecordOutcome =
 export type FailureReason =
   /** WhatsApp Web's page did not match what the adapter expects. */
   | 'page-not-recognised'
-  /** Chrome has not given the extension access to capture this tab. */
+  /** Chrome did not let the extension capture this tab. */
   | 'capture-not-allowed'
-  /** Capturing the screen failed for another reason (for example a hidden tab). */
+  /** Capturing the screen failed for another reason (for example the capture session was ended part-way). */
   | 'capture-failed'
   /** Another Chat Record is still being made; only one runs at a time. */
   | 'busy';
