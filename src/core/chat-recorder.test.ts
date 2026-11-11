@@ -392,6 +392,26 @@ describe('a Chat Record that cannot be made', () => {
   });
 });
 
+describe('progress while a Date Range is recorded', () => {
+  test('is reported once per screen captured, with the day the Chat Record has reached', async () => {
+    const recorder = recorderFor(sixDays);
+    const progress: unknown[] = [];
+
+    await recorder.record(
+      { kind: 'date-range', from: '2026-11-02', to: '2026-11-04' },
+      { onProgress: (p) => progress.push(p) },
+    );
+
+    // 2-4 Nov is 1620px: three screens of a 678px chat area. The first screen
+    // shows 2 Nov and the start of 3 Nov, the second reaches 4 Nov.
+    expect(progress).toEqual([
+      { screensCaptured: 1, reachedDay: '2026-11-03' },
+      { screensCaptured: 2, reachedDay: '2026-11-04' },
+      { screensCaptured: 3, reachedDay: '2026-11-04' },
+    ]);
+  });
+});
+
 /** Pixels below the band that are not exactly the chat area's screen pixels (at most 5 listed). */
 function mismatchedChatPixels(image: Awaited<ReturnType<typeof readScreenPositions>>, band: number) {
   const mismatches: string[] = [];

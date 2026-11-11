@@ -47,8 +47,24 @@ export type FailureReason =
   /** Capturing the screen failed for another reason (for example a hidden tab). */
   | 'capture-failed';
 
+/** How far a Chat Record has got, reported after every screen captured. */
+export interface RecordProgress {
+  /** Screens (chat-area viewports) captured so far in this Chat Record. */
+  screensCaptured: number;
+  /**
+   * The day of the last message captured so far. Absent when the recorder
+   * does not read days (a record of the visible chat).
+   */
+  reachedDay?: LocalDay;
+}
+
+export interface RecordOptions {
+  /** Called once per screen captured. */
+  onProgress?: (progress: RecordProgress) => void;
+}
+
 export interface ChatRecorder {
-  record(request: ChatRecordRequest): Promise<ChatRecordOutcome>;
+  record(request: ChatRecordRequest, options?: RecordOptions): Promise<ChatRecordOutcome>;
 }
 
 export interface ChatRecorderDeps {
@@ -60,12 +76,18 @@ export interface ChatRecorderDeps {
 
 type Deps = Required<ChatRecorderDeps>;
 
+/** One recording's deps and options. */
+interface Run extends Deps {
+  onProgress: (progress: RecordProgress) => void;
+}
+
 export function createChatRecorder({ page, camera, clock }: ChatRecorderDeps): ChatRecorder {
   const deps: Deps = { page, camera, clock: clock ?? (() => new Date()) };
   return {
-    async record(request) {
+    async record(request, options = {}) {
+      const run: Run = { ...deps, onProgress: options.onProgress ?? (() => {}) };
       try {
-        return request.kind === 'date-range' ? await recordDateRange(deps, request) : await recordVisible(deps);
+        return request.kind === 'date-range' ? await recordDateRange(run, request) : await recordVisible(run);
       } catch (error) {
         return { kind: 'failed', reason: failureReason(error), detail: errorMessage(error) };
       }
@@ -73,11 +95,12 @@ export function createChatRecorder({ page, camera, clock }: ChatRecorderDeps): C
   };
 }
 
-async function recordVisible(deps: Deps): Promise<ChatRecordOutcome> {
-  const chatName = deps.page.chatName();
-  const area = deps.page.chatArea();
-  const takenAt = deps.clock();
-  const screenshot = await deps.camera.capture();
+async function recordVisible(run: Run): Promise<ChatRecordOutcome> {
+  const chatName = run.page.chatName();
+  const area = run.page.chatArea();
+  const takenAt = run.clock();
+  const screenshot = await run.camera.capture();
+  run.onProgress({ screensCaptured: 1 });
   const pixels = crop(screenshot.bitmap, area, screenshot.devicePixelRatio);
   const span = visibleChatSpan(takenAt);
   return finishRecord({ chatName, span, takenAt, pixels, devicePixelRatio: screenshot.devicePixelRatio });
@@ -123,15 +146,15 @@ const captureOverlap = 8;
 const maxScrollStops = 10_000;
 
 async function recordDateRange(
-  deps: Deps,
+  run: Run,
   request: { from: LocalDay; to: LocalDay },
 ): Promise<ChatRecordOutcome> {
-  const { page, camera } = deps;
+  const { page, camera } = run;
   const { from, to } = request;
   const noMessages: ChatRecordOutcome = { kind: 'no-messages', from, to };
   const chatName = page.chatName();
   const area = page.chatArea();
-  const takenAt = deps.clock();
+  const takenAt = run.clock();
 
   const first = await scrollToFirstDivider(page, from, area.height);
   if (!first || first.day > to) return noMessages;
@@ -185,6 +208,7 @@ async function recordDateRange(
       const sliceTo = Math.min(visibleTo, end);
       slices.push(await cutSlice(screenshot.bitmap, area, devicePixelRatio, covered, sliceTo, visibleFrom));
       covered = sliceTo;
+      run.onProgress({ screensCaptured: slices.length, reachedDay: dayAt(dividerRows, covered - 1) });
     }
     if (endKnown && covered >= end) break;
     if (atBottom) throw new Error('WhatsApp Web stopped scrolling before the end of the range');
