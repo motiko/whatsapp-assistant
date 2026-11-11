@@ -66,7 +66,8 @@ export function createWhatsAppWebPage(doc: Document, options: WhatsAppWebPageOpt
         if (message) {
           const id = message.getAttribute('data-id');
           if (!id) throw new PageNotRecognisedError('a message without its id (data-id)');
-          items.push({ kind: 'message', id, ...span });
+          const time = messageTime(message);
+          items.push(time ? { kind: 'message', id, time, ...span } : { kind: 'message', id, ...span });
           continue;
         }
         const day = readDividerDay(row.textContent?.trim() ?? '', now, locale);
@@ -120,6 +121,16 @@ export function createWhatsAppWebPage(doc: Document, options: WhatsAppWebPageOpt
  * may show a very long message in several steps, each with its own "Read more".
  */
 const maxReadMoreRounds = 20;
+
+/**
+ * The time of day a message shows, read from the start of its
+ * `data-pre-plain-text` ("[14:32, 11/11/2026] Name: "). Only the time is
+ * taken; the date, sender and text are not read.
+ */
+function messageTime(message: Element): string | undefined {
+  const label = message.querySelector(selectors.messageTimestamp)?.getAttribute('data-pre-plain-text') ?? '';
+  return /^\[([^,\]]+),/.exec(label)?.[1]?.trim() || undefined;
+}
 
 /** Every item of the message list, with its vertical span in content positions. */
 function listRows(doc: Document): { row: Element; span: { top: number; bottom: number } }[] {

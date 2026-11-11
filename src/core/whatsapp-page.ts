@@ -69,9 +69,11 @@ export type ChatItem =
   /**
    * A message. `id` is WhatsApp Web's own name for it (`data-id`): it stays
    * the same while the message is loaded, unloaded and loaded again, so the
-   * same message can be recognised at another scroll stop.
+   * same message can be recognised at another scroll stop. `time` is the
+   * time of day it shows (for example `14:32` or `2:32 PM`), when the adapter
+   * can read it; nothing else about the message is read.
    */
-  | { kind: 'message'; id: string; top: number; bottom: number };
+  | { kind: 'message'; id: string; time?: string; top: number; bottom: number };
 
 /** A rectangle in CSS pixels. */
 export interface Rect {

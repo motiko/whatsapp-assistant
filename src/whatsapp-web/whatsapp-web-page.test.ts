@@ -55,7 +55,7 @@ describe('WhatsApp Web adapter on a Chat spanning several days', () => {
     expect(page.loadedItems().filter((item) => item.kind === 'date-divider')).toEqual(dividers);
   });
 
-  test('reports the messages after a divider, each named by its WhatsApp id, and leaves out rows that are neither', async () => {
+  test('reports the messages after a divider, each named by its WhatsApp id with the time it shows, and leaves out rows that are neither', async () => {
     const page = createWhatsAppWebPage(await loadSnapshot(multiDayChat), options);
 
     const items = page.loadedItems();
@@ -64,10 +64,10 @@ describe('WhatsApp Web adapter on a Chat spanning several days', () => {
     // Today: two messages, the unread banner (1702-1742, left out), two more.
     expect(items.slice(-5)).toEqual([
       dividers[4],
-      { kind: 'message', id: 'false_10000000001@c.us_SYNTH0023', top: 1582, bottom: 1642 },
-      { kind: 'message', id: 'true_10000000001@c.us_SYNTH0024', top: 1642, bottom: 1702 },
-      { kind: 'message', id: 'false_10000000001@c.us_SYNTH0025', top: 1742, bottom: 1802 },
-      { kind: 'message', id: 'true_10000000001@c.us_SYNTH0026', top: 1802, bottom: 1862 },
+      { kind: 'message', id: 'false_10000000001@c.us_SYNTH0023', time: '09:41', top: 1582, bottom: 1642 },
+      { kind: 'message', id: 'true_10000000001@c.us_SYNTH0024', time: '10:48', top: 1642, bottom: 1702 },
+      { kind: 'message', id: 'false_10000000001@c.us_SYNTH0025', time: '11:55', top: 1742, bottom: 1802 },
+      { kind: 'message', id: 'true_10000000001@c.us_SYNTH0026', time: '12:02', top: 1802, bottom: 1862 },
     ]);
   });
 
@@ -116,10 +116,10 @@ describe('WhatsApp Web adapter on a Chat with long messages behind "Read more"',
     // a message row 20 plus 20 a line, a truncated one three lines and "Read more".
     expect(page.loadedItems().slice(0, 5)).toEqual([
       { kind: 'date-divider', day: '2026-11-11', top: 12, bottom: 62 },
-      { kind: 'message', id: 'false_10000000001@c.us_SYNTH0001', top: 62, bottom: 122 },
-      { kind: 'message', id: 'true_10000000001@c.us_SYNTH0002', top: 122, bottom: 222 },
-      { kind: 'message', id: 'false_10000000001@c.us_SYNTH0003', top: 222, bottom: 282 },
-      { kind: 'message', id: 'false_10000000001@c.us_SYNTH0004', top: 282, bottom: 382 },
+      { kind: 'message', id: 'false_10000000001@c.us_SYNTH0001', time: '09:07', top: 62, bottom: 122 },
+      { kind: 'message', id: 'true_10000000001@c.us_SYNTH0002', time: '09:14', top: 122, bottom: 222 },
+      { kind: 'message', id: 'false_10000000001@c.us_SYNTH0003', time: '09:21', top: 222, bottom: 282 },
+      { kind: 'message', id: 'false_10000000001@c.us_SYNTH0004', time: '09:28', top: 282, bottom: 382 },
     ]);
   });
 

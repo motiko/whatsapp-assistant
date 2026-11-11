@@ -22,6 +22,12 @@ export const selectors = {
    */
   /** Present inside a row that is a message (its id names the Chat and the message). */
   message: '[data-id]',
+  /**
+   * Inside a text message: the element whose `data-pre-plain-text` starts with
+   * the message's time, "[14:32, 11/11/2026] Name: ". Only the time is read.
+   * Media without a caption may not have one. (Unverified against the real page.)
+   */
+  messageTimestamp: '[data-pre-plain-text]',
   /** The "Read more" button inside a message WhatsApp Web shows cut short. */
   readMore: '.read-more-button',
   /**
