@@ -2,6 +2,7 @@ import { CaptureNotAllowedError, type Camera } from './camera';
 import { contextBandText, withContextBand } from './context-band';
 import { localDayOf, type DaySpan, type LocalDay } from './day-span';
 import { chatRecordFileName } from './file-name';
+import { pdfOfImages } from './pdf';
 import { PageNotRecognisedError, type Rect, type WhatsAppPage } from './whatsapp-page';
 
 /**
@@ -16,8 +17,16 @@ export type ChatRecordRequest = { kind: 'visible' } | { kind: 'date-range'; from
 export interface ChatRecord {
   /** The Chat this record is of. */
   chatName: string;
-  format: 'png';
-  /** The Context Band above WhatsApp Web's own pixels, encoded as `format`. */
+  /**
+   * `png` for one image; `pdf` for a Chat Record taller than
+   * `maxPngChatAreaHeights` chat areas, as pages of about one chat area each.
+   */
+  format: 'png' | 'pdf';
+  /**
+   * The Context Band above WhatsApp Web's own pixels, encoded as `format`: one
+   * PNG image, or a PDF whose pages are lossless images, broken between
+   * messages, with the Context Band at the top of the first page.
+   */
   image: Blob;
   /** The name to save it under, for example `Chat history - Alice - 2026-11-11.png`. */
   fileName: string;
@@ -78,28 +87,77 @@ async function recordVisible(deps: Deps): Promise<ChatRecordOutcome> {
   const area = deps.page.chatArea();
   const takenAt = deps.clock();
   const screenshot = await deps.camera.capture();
-  const pixels = crop(screenshot.bitmap, area, screenshot.devicePixelRatio);
+  const { devicePixelRatio } = screenshot;
+  const slice = await cutSlice(screenshot.bitmap, area, devicePixelRatio, 0, area.height, 0);
   const span = visibleChatSpan(takenAt);
-  return finishRecord({ chatName, span, takenAt, pixels, devicePixelRatio: screenshot.devicePixelRatio });
+  const stitched = { slices: [slice], area, devicePixelRatio, rows: area.height, pageBreaks: new Set<number>() };
+  return finishRecord({ chatName, span, takenAt, stitched });
 }
 
 /**
- * Puts the Context Band above `pixels` (WhatsApp Web's own pixels, untouched)
- * and names the Chat Record, both from the span it actually covers.
+ * A Chat Record taller than this many chat-area heights (about one screen
+ * each) is a PDF instead of a PNG, to stay usable and within Chrome's image
+ * size limits.
+ */
+const maxPngChatAreaHeights = 10;
+
+/**
+ * Puts the Context Band above the stitched WhatsApp Web pixels (untouched),
+ * as one PNG or, when taller than `maxPngChatAreaHeights` chat areas, as a
+ * PDF of pages about one chat area tall, and names the Chat Record; all from
+ * the span it actually covers. Takes ownership of the slices.
  */
 async function finishRecord(parts: {
   chatName: string;
   span: DaySpan;
   takenAt: Date;
-  pixels: OffscreenCanvas;
-  devicePixelRatio: number;
+  stitched: Stitched;
 }): Promise<ChatRecordOutcome> {
-  const { chatName, span, takenAt } = parts;
+  const { chatName, span, takenAt, stitched } = parts;
+  const { area, devicePixelRatio, rows } = stitched;
   const contextBand = contextBandText({ chatName, span, takenAt });
-  const withBand = withContextBand(parts.pixels, contextBand, parts.devicePixelRatio);
-  const image = await withBand.convertToBlob({ type: 'image/png' });
-  const fileName = chatRecordFileName(chatName, span, 'png');
-  return { kind: 'record', record: { chatName, format: 'png', image, fileName, span, takenAt, contextBand } };
+  const format = rows > maxPngChatAreaHeights * area.height ? 'pdf' : 'png';
+  const fileName = chatRecordFileName(chatName, span, format);
+  try {
+    let image: Blob;
+    if (format === 'png') {
+      const pixels = stitchRows(stitched, { from: 0, to: rows });
+      image = await withContextBand(pixels, contextBand, devicePixelRatio).convertToBlob({ type: 'image/png' });
+    } else {
+      const pages = pageSpans(rows, stitched.pageBreaks, area.height);
+      // One page's canvas at a time: the whole record would be too tall for one.
+      const images = (async function* () {
+        for (const [index, page] of pages.entries()) {
+          const pixels = stitchRows(stitched, page);
+          yield index === 0 ? withContextBand(pixels, contextBand, devicePixelRatio) : pixels;
+        }
+      })();
+      image = await pdfOfImages(images, { devicePixelRatio, title: fileName.replace(/\.pdf$/, ''), createdAt: takenAt });
+    }
+    return { kind: 'record', record: { chatName, format, image, fileName, span, takenAt, contextBand } };
+  } finally {
+    for (const slice of stitched.slices) slice.bitmap.close();
+  }
+}
+
+/**
+ * Splits `rows` rows (record rows, CSS px) into pages of at most `pageHeight`
+ * rows. Each page ends at the latest place it may break (the top of a message
+ * or date divider) that fits. Only a message taller than a whole page, with no
+ * such place in reach, is split, at exactly `pageHeight`.
+ */
+function pageSpans(rows: number, pageBreaks: Set<number>, pageHeight: number): RowSpan[] {
+  const breaks = [...pageBreaks].filter((row) => row > 0 && row < rows).sort((a, b) => a - b);
+  const pages: RowSpan[] = [];
+  let from = 0;
+  while (rows - from > pageHeight) {
+    const fitting = breaks.filter((row) => row > from && row <= from + pageHeight);
+    const to = fitting.at(-1) ?? from + pageHeight;
+    pages.push({ from, to });
+    from = to;
+  }
+  pages.push({ from, to: rows });
+  return pages;
 }
 
 /**
@@ -141,6 +199,8 @@ async function recordDateRange(
   // messages above), so everything is kept relative to the first divider
   // ("record rows") and re-anchored on any divider seen before.
   const dividerRows = new Map<LocalDay, number>([[first.day, 0]]);
+  /** Record rows where a PDF page may start: the tops of messages and date dividers. */
+  const pageBreaks = new Set<number>();
   let origin = first.top;
   let lastInRange: { row: number; day: LocalDay } | undefined;
   let endKnown = false;
@@ -159,6 +219,7 @@ async function recordDateRange(
     for (const item of items) {
       const top = item.top - origin;
       const bottom = item.bottom - origin;
+      if (top > 0) pageBreaks.add(top);
       if (item.kind === 'date-divider') {
         if (top < 0) continue;
         dividerRows.set(item.day, top);
@@ -192,9 +253,9 @@ async function recordDateRange(
   }
 
   if (!lastInRange) return noMessages;
-  const pixels = stitch(slices, area, devicePixelRatio, lastInRange.row);
   const span = { from: first.day, to: lastInRange.day };
-  return finishRecord({ chatName, span, takenAt, pixels, devicePixelRatio });
+  const stitched = { slices, area, devicePixelRatio, rows: lastInRange.row, pageBreaks };
+  return finishRecord({ chatName, span, takenAt, stitched });
 }
 
 /** The day of the latest known divider at or above `row`. */
@@ -266,14 +327,30 @@ async function cutSlice(
   return { bitmap, y };
 }
 
-function stitch(slices: Slice[], area: Rect, devicePixelRatio: number, rows: number): OffscreenCanvas {
-  const width = Math.round(area.width * devicePixelRatio);
-  const height = Math.round(rows * devicePixelRatio);
-  const canvas = new OffscreenCanvas(width, height);
+/** A run of record rows (CSS px), `from` included and `to` not. */
+interface RowSpan {
+  from: number;
+  to: number;
+}
+
+/** The slices of a Chat Record, which together cover rows 0 to `rows` of the chat area without gaps. */
+interface Stitched {
+  slices: Slice[];
+  area: Rect;
+  devicePixelRatio: number;
+  rows: number;
+  /** Record rows where a PDF page may start (see `pageSpans`). */
+  pageBreaks: Set<number>;
+}
+
+/** Rows `span` of the stitched slices, as one image. */
+function stitchRows({ slices, area, devicePixelRatio }: Stitched, span: RowSpan): OffscreenCanvas {
+  const top = Math.round(span.from * devicePixelRatio);
+  const bottom = Math.round(span.to * devicePixelRatio);
+  const canvas = new OffscreenCanvas(Math.round(area.width * devicePixelRatio), bottom - top);
   const context = canvas.getContext('2d')!;
   for (const slice of slices) {
-    context.drawImage(slice.bitmap, 0, slice.y);
-    slice.bitmap.close();
+    if (slice.y < bottom && slice.y + slice.bitmap.height > top) context.drawImage(slice.bitmap, 0, slice.y - top);
   }
   return canvas;
 }
@@ -286,14 +363,4 @@ function failureReason(error: unknown): FailureReason {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-function crop(bitmap: ImageBitmap, area: Rect, devicePixelRatio: number): OffscreenCanvas {
-  const left = Math.round(area.left * devicePixelRatio);
-  const top = Math.round(area.top * devicePixelRatio);
-  const width = Math.round(area.width * devicePixelRatio);
-  const height = Math.round(area.height * devicePixelRatio);
-  const canvas = new OffscreenCanvas(width, height);
-  canvas.getContext('2d')!.drawImage(bitmap, left, top, width, height, 0, 0, width, height);
-  return canvas;
 }
