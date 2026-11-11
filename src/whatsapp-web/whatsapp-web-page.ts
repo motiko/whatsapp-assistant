@@ -1,12 +1,29 @@
-import { PageNotRecognisedError, type Rect, type WhatsAppPage } from '../core/whatsapp-page';
+import { PageNotRecognisedError, type ChatItem, type Rect, type WhatsAppPage } from '../core/whatsapp-page';
+import { readDividerDay } from './divider-dates';
 import { selectors } from './selectors';
+
+export interface WhatsAppWebPageOptions {
+  /** Now, for reading "Today", "Yesterday" and weekday dividers. Defaults to the clock. */
+  today?: () => Date;
+  /** The language WhatsApp Web shows dates in. Defaults to the browser's. */
+  locale?: string;
+  /**
+   * How long the message list must stay the same height after a scroll
+   * before it counts as settled (WhatsApp Web renders and loads messages
+   * after scrolling). Defaults to 300 ms.
+   */
+  settleMs?: number;
+}
 
 /**
  * The real WhatsApp Page: reads the Chat open in WhatsApp Web's page.
- * The only module (with `selectors.ts` and `chat-header.ts`) that knows
- * WhatsApp Web's page structure.
+ * The only module (with `selectors.ts`, `divider-dates.ts` and
+ * `chat-header.ts`) that knows WhatsApp Web's page structure.
  */
-export function createWhatsAppWebPage(doc: Document): WhatsAppPage {
+export function createWhatsAppWebPage(doc: Document, options: WhatsAppWebPageOptions = {}): WhatsAppPage {
+  const today = options.today ?? (() => new Date());
+  const locale = options.locale ?? doc.defaultView?.navigator.language ?? 'en';
+  const settleMs = options.settleMs ?? 300;
   return {
     chatName() {
       const header = find(doc, selectors.chatHeader, 'the Chat header');
@@ -27,7 +44,43 @@ export function createWhatsAppWebPage(doc: Document): WhatsAppPage {
       };
       return clipToViewport(area, doc);
     },
+    scrollTop: () => messageScroller(doc).scrollTop,
+    scrollHeight: () => messageScroller(doc).scrollHeight,
+    async scrollTo(top) {
+      const scroller = messageScroller(doc);
+      scroller.scrollTop = top;
+      await settle(doc.defaultView!, scroller, settleMs);
+    },
+    loadedItems() {
+      const scroller = messageScroller(doc);
+      const list = find(doc, selectors.messageList, 'the message list');
+      // Content position 0 is the top of the scroll container's content.
+      const origin = scroller.getBoundingClientRect().top + scroller.clientTop - scroller.scrollTop;
+      const now = today();
+      const items: ChatItem[] = [];
+      for (const row of list.querySelectorAll(selectors.messageListRow)) {
+        const box = row.getBoundingClientRect();
+        const span = { top: box.top - origin, bottom: box.bottom - origin };
+        if (row.querySelector(selectors.message)) {
+          items.push({ kind: 'message', ...span });
+          continue;
+        }
+        const day = readDividerDay(row.textContent?.trim() ?? '', now, locale);
+        if (day) items.push({ kind: 'date-divider', day, ...span });
+      }
+      return items;
+    },
   };
+}
+
+/** Resolves once the list has been painted and its height has stopped changing. */
+async function settle(view: Window, scroller: HTMLElement, settleMs: number): Promise<void> {
+  for (let round = 0; round < 20; round++) {
+    const height = scroller.scrollHeight;
+    await new Promise((resolve) => view.requestAnimationFrame(() => view.requestAnimationFrame(resolve)));
+    if (settleMs > 0) await new Promise((resolve) => view.setTimeout(resolve, settleMs));
+    if (scroller.scrollHeight === height) return;
+  }
 }
 
 /**

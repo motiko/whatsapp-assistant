@@ -17,7 +17,12 @@ today's WhatsApp Web. Replace them with real snapshots as soon as possible.
 | --- | --- |
 | `one-to-one-chat.html` | An open one-to-one Chat, light theme |
 | `group-chat.html` | An open group Chat (sender names on incoming messages), light theme |
+| `multi-day-chat.html` | A one-to-one Chat over five days (date dividers "28/10/2026", "03/11/2026", "Monday", "Yesterday", "Today" as of Wed 11 Nov 2026, in the en-GB date order), with an "unread messages" banner, long enough to scroll. It fixes every row's height (see its `<style>`) so the tests can state exact positions. |
 | `unrelated-page.html` | A page that is not WhatsApp Web's Chat view |
+
+The adapter reads divider labels relative to a given "today" and locale, so tests of
+`multi-day-chat.html` pass `today: 11 Nov 2026` and `locale: 'en-GB'`; a real snapshot
+needs the date it was taken and the language WhatsApp Web was showing.
 
 Each snapshot embeds a small `<style>` block that fixes the layout the tests assert
 (nav rail 64px, Chat list 400px, Chat header 59px, message box 62px, 6px scrollbar).

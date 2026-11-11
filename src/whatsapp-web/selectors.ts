@@ -15,4 +15,8 @@ export const selectors = {
   chatHeaderText: 'span[dir="auto"]',
   /** The list of messages and date dividers, inside the conversation pane. */
   messageList: '#main [role="application"]',
+  /** Each item of the message list: a date divider, a message, or another row (e.g. an unread banner). */
+  messageListRow: '[role="row"]',
+  /** Present inside a row that is a message (its id names the Chat and the message). */
+  message: '[data-id]',
 } as const;

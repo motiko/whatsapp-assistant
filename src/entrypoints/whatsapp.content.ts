@@ -21,17 +21,18 @@ export default defineContentScript({
           return undefined;
         }
       },
-      createChatRecord() {
+      createChatRecord(range) {
         if (recording) return Promise.resolve({ kind: 'failed', reason: 'busy', detail: 'a Chat Record is already being made' });
         recording = true;
-        const outcome = recorder.record({ kind: 'visible' });
+        const outcome = recorder.record({ kind: 'date-range', from: range.from, to: range.to });
         // Start the clipboard write now, inside the click, with the PNG to follow.
         const copied = copyPngToClipboard(
-          outcome.then((o) => (o.kind === 'record' ? o.record.image : Promise.reject(new Error(o.detail)))),
+          outcome.then((o) => (o.kind === 'record' ? o.record.image : Promise.reject(new Error(o.kind)))),
         );
         return Promise.all([outcome, copied.then(() => undefined, (error: unknown) => error)])
           .then(([o, clipboardError]): CreateResult => {
             if (o.kind === 'failed') return o;
+            if (o.kind === 'no-messages') return o;
             const file = { name: o.record.fileName, image: o.record.image };
             if (clipboardError) return { kind: 'made', file, clipboard: { copied: false, detail: String(clipboardError) } };
             return { kind: 'made', file, clipboard: { copied: true } };
