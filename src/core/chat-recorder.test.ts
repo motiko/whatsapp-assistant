@@ -452,6 +452,132 @@ describe('PNG or PDF', () => {
   });
 });
 
+describe('PDF pages', () => {
+  // Three days of a 40px divider and seven messages of different heights (385px a day).
+  const unevenDays: FakeChatDay[] = ['2026-11-01', '2026-11-02', '2026-11-03'].map((day) => ({
+    day,
+    messageHeights: [30, 70, 45, 60, 25, 80, 35],
+  }));
+
+  /** The content rows where the scripted Chat's dividers and messages start, laid out as the fake page does. */
+  function itemTops(chat: FakeChatDay[]): Set<number> {
+    const tops = new Set<number>();
+    let y = 0;
+    for (const { messageHeights } of chat) {
+      for (const height of [40, ...messageHeights]) {
+        tops.add(y);
+        y += height;
+      }
+    }
+    return tops;
+  }
+
+  async function pdfPages(outcome: ChatRecordOutcome) {
+    expect(outcome).toMatchObject({ kind: 'record', record: { format: 'pdf' } });
+    if (outcome.kind !== 'record') throw new Error('no record');
+    const pages = await readPdfPages(outcome.record.image);
+    const band = drawContextBand(outcome.record.contextBand, smallChatArea.width, 1).height;
+    // The WhatsApp pixels of each page: below the Context Band on the first, all of the others.
+    const content = pages.map((page, index) => {
+      const top = index === 0 ? band : 0;
+      return { height: page.height - top, firstRow: page.at(0, top).y, lastRow: page.at(0, page.height - 1).y, page, top };
+    });
+    return { pages, band, content };
+  }
+
+  test('break between messages, about one chat area each, covering every row once', async () => {
+    const recorder = smallScreenRecorderFor(unevenDays);
+
+    const outcome = await recorder.record({ kind: 'date-range', from: '2026-11-01', to: '2026-11-03' });
+
+    const { content } = await pdfPages(outcome);
+    const tops = itemTops(unevenDays);
+    // The first page ends before the 70px message that would not fit: rows 0-69.
+    expect(content[0]).toMatchObject({ firstRow: 0, lastRow: 69 });
+    let next = 0;
+    for (const page of content) {
+      expect(page.firstRow).toBe(next);
+      expect(tops.has(page.firstRow)).toBe(true);
+      expect(page.height).toBeLessThanOrEqual(smallChatArea.height);
+      for (let row = 0; row < page.height; row++) {
+        expect(page.page.at(0, page.top + row)).toEqual({ x: 100, y: page.firstRow + row });
+      }
+      next = page.lastRow + 1;
+    }
+    expect(next).toBe(1155);
+  });
+
+  test('show the Context Band at the top of the first page only', async () => {
+    const recorder = smallScreenRecorderFor(unevenDays);
+
+    const outcome = await recorder.record({ kind: 'date-range', from: '2026-11-01', to: '2026-11-03' });
+
+    const { pages, band, content } = await pdfPages(outcome);
+    expect(band).toBeGreaterThan(0);
+    expect(pages[0]!.colourCount(0, 0, pages[0]!.width, band)).toBeGreaterThan(1); // text is drawn on it
+    expect(pages[0]!.at(0, band)).toEqual({ x: 100, y: 0 }); // the first day's divider follows it
+    for (const page of content.slice(1)) {
+      expect(page.page.height).toBe(page.height); // nothing above the WhatsApp pixels
+    }
+    expect(outcome).toMatchObject({
+      record: { contextBand: ['Chat: Alice', 'Messages: 2026-11-01 to 2026-11-03', 'Taken: 2026-11-11 14:32 (UTC+01:00)'] },
+    });
+  });
+
+  test('are the size the Chat looked on screen', async () => {
+    const recorder = smallScreenRecorderFor(unevenDays);
+
+    const outcome = await recorder.record({ kind: 'date-range', from: '2026-11-01', to: '2026-11-03' });
+
+    // 300 CSS px at 96 to the inch is 225 PDF points (72 to the inch).
+    const { pages } = await pdfPages(outcome);
+    for (const page of pages) {
+      expect(page.width).toBe(300);
+      expect(page.size).toEqual({ width: 225, height: page.height * 0.75 });
+    }
+  });
+
+  test('keep every device pixel on a high-density screen, with no gaps or repeats between pages', async () => {
+    const page = createFakeWhatsAppPage({ chatName: 'Alice', chatArea: smallChatArea, chat: unevenDays });
+    const camera = createFakeCamera({ viewport: smallViewport, page, devicePixelRatio: 2 });
+    const recorder = createChatRecorder({ page, camera });
+
+    const outcome = await recorder.record({ kind: 'date-range', from: '2026-11-01', to: '2026-11-03' });
+
+    expect(outcome).toMatchObject({ kind: 'record', record: { format: 'pdf' } });
+    if (outcome.kind !== 'record') return;
+    const pages = await readPdfPages(outcome.record.image);
+    const band = drawContextBand(outcome.record.contextBand, 600, 2).height;
+    let next = 0;
+    for (const [index, pdfPage] of pages.entries()) {
+      expect(pdfPage.width).toBe(600);
+      expect(pdfPage.size.width).toBe(225);
+      for (let row = index === 0 ? band : 0; row < pdfPage.height; row++) {
+        expect(pdfPage.at(0, row)).toEqual({ x: 200, y: next++ });
+      }
+    }
+    expect(next).toBe(2310);
+  });
+
+  test('split a message only when it is taller than a whole page', async () => {
+    // 1 Nov holds a 250px message (rows 80-330) between two 40px ones.
+    const chat = twoHundredPixelDays(6);
+    chat[0]!.messageHeights = [40, 250, 40];
+    const recorder = smallScreenRecorderFor(chat);
+
+    const outcome = await recorder.record({ kind: 'date-range', from: '2026-11-01', to: '2026-11-06' });
+
+    const { content } = await pdfPages(outcome);
+    expect(content.slice(0, 5).map(({ firstRow, lastRow }) => [firstRow, lastRow])).toEqual([
+      [0, 79],
+      [80, 179],
+      [180, 279],
+      [280, 369],
+      [370, 449],
+    ]);
+  });
+});
+
 /** Pixels below the band that are not exactly the chat area's screen pixels (at most 5 listed). */
 function mismatchedChatPixels(image: Awaited<ReturnType<typeof readScreenPositions>>, band: number) {
   const mismatches: string[] = [];
