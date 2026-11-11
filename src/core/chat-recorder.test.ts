@@ -403,3 +403,69 @@ function mismatchedChatPixels(image: Awaited<ReturnType<typeof readScreenPositio
   }
   return mismatches;
 }
+
+describe('a Date Range starting before the earliest message WhatsApp Web can load', () => {
+  test('is recorded from the earliest available day, and the Context Band says so', async () => {
+    // WhatsApp Web can load nothing before 3 Nov.
+    const page = createFakeWhatsAppPage({ chatName: 'Alice', chatArea, chat: sixDays.slice(2) });
+    const recorder = createChatRecorder({
+      page,
+      camera: createFakeCamera({ viewport, page }),
+      clock: () => new Date('2026-11-11T13:32:05Z'),
+    });
+
+    const outcome = await recorder.record({ kind: 'date-range', from: '2026-11-01', to: '2026-11-04' });
+
+    expect(outcome).toMatchObject({
+      kind: 'record',
+      record: {
+        span: { from: '2026-11-03', to: '2026-11-04' },
+        historyIncomplete: true,
+        contextBand: [
+          'Chat: Alice',
+          'Messages: 2026-11-03 to 2026-11-04',
+          'Taken: 2026-11-11 14:32 (UTC+01:00)',
+          'Requested from 2026-11-01; earliest available 2026-11-03',
+        ],
+        fileName: 'Chat history - Alice - 2026-11-03 to 2026-11-04.png',
+      },
+    });
+    // 3 Nov's divider (now at 0) to the end of 4 Nov.
+    const image = await recordedImage(outcome);
+    expect(image.height).toBe(1080);
+    expect(image.at(0, 0).y).toBe(0);
+    expect(image.at(0, 1079).y).toBe(1079);
+  });
+
+  test('is recorded in full, with no note, when older messages must first be fetched from the phone', async () => {
+    const page = createFakeWhatsAppPage({
+      chatName: 'Alice',
+      chatArea,
+      chat: sixDays.slice(4),
+      olderMessages: sixDays.slice(2, 4),
+      olderMessagesOnPhone: sixDays.slice(0, 2),
+    });
+    const recorder = createChatRecorder({ page, camera: createFakeCamera({ viewport, page }) });
+
+    const outcome = await recorder.record({ kind: 'date-range', from: '2026-11-02', to: '2026-11-04' });
+
+    expect(outcome).toMatchObject({
+      kind: 'record',
+      record: { span: { from: '2026-11-02', to: '2026-11-04' }, historyIncomplete: false },
+    });
+    if (outcome.kind !== 'record') return;
+    expect(outcome.record.contextBand).toHaveLength(3);
+    const image = await recordedImage(outcome);
+    expect(image.height).toBe(1620);
+    expect(image.at(0, 0).y).toBe(540);
+  });
+
+  test('that has no messages on any available day produces nothing', async () => {
+    const page = createFakeWhatsAppPage({ chatName: 'Alice', chatArea, chat: sixDays.slice(4) });
+    const recorder = createChatRecorder({ page, camera: createFakeCamera({ viewport, page }) });
+
+    const outcome = await recorder.record({ kind: 'date-range', from: '2026-11-01', to: '2026-11-03' });
+
+    expect(outcome).toEqual({ kind: 'no-messages', from: '2026-11-01', to: '2026-11-03' });
+  });
+});

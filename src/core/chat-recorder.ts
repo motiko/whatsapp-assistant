@@ -31,6 +31,12 @@ export interface ChatRecord {
   takenAt: Date;
   /** The Context Band's text, one entry per line. */
   contextBand: string[];
+  /**
+   * WhatsApp Web ran out of older messages before the requested Date Range's
+   * first day, so the record starts at the earliest day available (and its
+   * Context Band says so).
+   */
+  historyIncomplete: boolean;
 }
 
 export type ChatRecordOutcome =
@@ -93,13 +99,20 @@ async function finishRecord(parts: {
   takenAt: Date;
   pixels: OffscreenCanvas;
   devicePixelRatio: number;
+  historyIncomplete?: boolean;
+  /** Extra Context Band lines, for example about incomplete history. */
+  notes?: string[];
 }): Promise<ChatRecordOutcome> {
-  const { chatName, span, takenAt } = parts;
-  const contextBand = contextBandText({ chatName, span, takenAt });
+  const { chatName, span, takenAt, notes } = parts;
+  const historyIncomplete = parts.historyIncomplete ?? false;
+  const contextBand = contextBandText({ chatName, span, takenAt, notes });
   const withBand = withContextBand(parts.pixels, contextBand, parts.devicePixelRatio);
   const image = await withBand.convertToBlob({ type: 'image/png' });
   const fileName = chatRecordFileName(chatName, span, 'png');
-  return { kind: 'record', record: { chatName, format: 'png', image, fileName, span, takenAt, contextBand } };
+  return {
+    kind: 'record',
+    record: { chatName, format: 'png', image, fileName, span, takenAt, contextBand, historyIncomplete },
+  };
 }
 
 /**
@@ -133,8 +146,9 @@ async function recordDateRange(
   const area = page.chatArea();
   const takenAt = deps.clock();
 
-  const first = await scrollToFirstDivider(page, from, area.height);
-  if (!first || first.day > to) return noMessages;
+  const start = await scrollToFirstDivider(page, from, area.height);
+  if (!start || start.divider.day > to) return noMessages;
+  const first = start.divider;
 
   // Walk down one chat-area height at a time from the first day's divider.
   // Content positions can shift between stops (WhatsApp Web loads older
@@ -194,7 +208,9 @@ async function recordDateRange(
   if (!lastInRange) return noMessages;
   const pixels = stitch(slices, area, devicePixelRatio, lastInRange.row);
   const span = { from: first.day, to: lastInRange.day };
-  return finishRecord({ chatName, span, takenAt, pixels, devicePixelRatio });
+  const historyIncomplete = !start.startReached;
+  const notes = historyIncomplete ? [`Requested from ${from}; earliest available ${first.day}`] : [];
+  return finishRecord({ chatName, span, takenAt, pixels, devicePixelRatio, historyIncomplete, notes });
 }
 
 /** The day of the latest known divider at or above `row`. */
@@ -207,11 +223,17 @@ function dayAt(dividerRows: Map<LocalDay, number>, row: number): LocalDay {
 }
 
 /**
- * Scrolls until the date divider of the first day on or after `from` is
- * loaded, and returns it (in content positions read at the last stop), or
- * undefined if no day on or after `from` has messages.
+ * Scrolls (loading older messages as needed) until the date divider of the
+ * first day on or after `from` is loaded, and returns it (in content
+ * positions read at the last stop), or undefined if no day on or after
+ * `from` has messages. `startReached` is false when WhatsApp Web ran out of
+ * older messages before `from`, so the divider is the earliest available.
  */
-async function scrollToFirstDivider(page: WhatsAppPage, from: LocalDay, step: number) {
+async function scrollToFirstDivider(
+  page: WhatsAppPage,
+  from: LocalDay,
+  step: number,
+): Promise<{ divider: { day: LocalDay; top: number }; startReached: boolean } | undefined> {
   let goingDown = false;
   let sawMessages = false;
   for (let stop = 0; stop < maxScrollStops; stop++) {
@@ -224,17 +246,20 @@ async function scrollToFirstDivider(page: WhatsAppPage, from: LocalDay, step: nu
     const index = dividers.findIndex((divider) => divider.day >= from);
 
     // A divider for `from` or later is the first such one once an earlier
-    // day's divider is loaded above it, or when nothing is above it.
-    if (index > 0 || (index === 0 && (atTop || goingDown))) return dividers[index];
+    // day's divider is loaded above it, or when it is `from`'s own divider.
+    if (index > 0 || (index === 0 && (goingDown || (atTop && dividers[0]!.day === from)))) {
+      return { divider: dividers[index]!, startReached: true };
+    }
     if (index === -1 && dividers.length > 0) goingDown = true;
     if (goingDown) {
       if (atBottom) return undefined;
       await page.scrollTo(scrollTop + step);
+    } else if (atTop) {
+      if ((await page.loadOlder()) === 'loaded') continue;
+      if (index === 0) return { divider: dividers[0]!, startReached: false };
+      if (sawMessages) throw new PageNotRecognisedError('no date dividers in the message list');
+      return undefined;
     } else {
-      if (atTop) {
-        if (sawMessages) throw new PageNotRecognisedError('no date dividers in the message list');
-        return undefined;
-      }
       await page.scrollTo(scrollTop - step);
     }
   }
