@@ -1,6 +1,7 @@
 import type { Camera } from '../core/camera';
 import { createChatRecorder } from '../core/chat-recorder';
 import { copyPngToClipboard } from '../extension/clipboard';
+import { createContinuationStore } from '../extension/continuation-store';
 import { downloadFile } from '../extension/download';
 import { isOpenPanelRequest } from '../extension/messages';
 import { createTabCamera } from '../extension/tab-camera';
@@ -33,9 +34,12 @@ export default defineContentScript({
         const outcome = recorder.record(request, run);
         // Start the clipboard write now, inside the click, with the PNG to follow
         // (a PDF is downloaded instead, and the clipboard is left as it was).
+        // A Partial Chat Record is copied (or downloaded) like any other.
         const copied = copyPngToClipboard(
           outcome.then((o) =>
-            o.kind === 'record' && o.record.format === 'png' ? o.record.image : Promise.reject(new Error(o.kind)),
+            (o.kind === 'record' || o.kind === 'partial') && o.record.format === 'png'
+              ? o.record.image
+              : Promise.reject(new Error(o.kind)),
           ),
         );
         return Promise.all([outcome, copied.then(() => undefined, (error: unknown) => error)])
@@ -43,9 +47,24 @@ export default defineContentScript({
             if (o.kind === 'failed') return o;
             if (o.kind === 'no-messages' || o.kind === 'empty-chat' || o.kind === 'cancelled') return o;
             const file = { name: o.record.fileName, image: o.record.image };
-            if (o.record.format === 'pdf') return { kind: 'made-pdf', file };
-            if (clipboardError) return { kind: 'made', file, clipboard: { copied: false, detail: String(clipboardError) } };
-            return { kind: 'made', file, clipboard: { copied: true } };
+            const extras = {
+              ...(o.kind === 'partial'
+                ? { partial: { continuation: o.continuation, reason: o.reason, detail: o.detail } }
+                : {}),
+              ...(o.gap
+                ? {
+                    gap:
+                      o.gap.kind === 'record'
+                        ? { kind: 'record' as const, file: { name: o.gap.record.fileName, image: o.gap.record.image } }
+                        : { kind: 'failed' as const, detail: o.gap.detail },
+                  }
+                : {}),
+            };
+            if (o.record.format === 'pdf') return { kind: 'made-pdf', file, ...extras };
+            if (clipboardError) {
+              return { kind: 'made', file, clipboard: { copied: false, detail: String(clipboardError) }, ...extras };
+            }
+            return { kind: 'made', file, clipboard: { copied: true }, ...extras };
           })
           .finally(() => {
             visibleTab.release();
@@ -55,6 +74,7 @@ export default defineContentScript({
       download(file) {
         downloadFile(document, file.image, file.name);
       },
+      continuations: createContinuationStore(),
     });
 
     const tabCamera = createTabCamera({ hideOwnUi: () => panel.hide() });

@@ -9,6 +9,14 @@ import {
  * capture the visible tab. It never stores or sends what it captures.
  */
 export default defineBackground(() => {
+  // Let the content script keep pending Continuations (ids and dates only) in
+  // session storage, which by default only the extension's own pages can use.
+  const shareSessionStorage = () =>
+    chrome.storage.session.setAccessLevel({ accessLevel: 'TRUSTED_AND_UNTRUSTED_CONTEXTS' }).catch(() => {});
+  void shareSessionStorage();
+  chrome.runtime.onStartup.addListener(shareSessionStorage);
+  chrome.runtime.onInstalled.addListener(shareSessionStorage);
+
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (!isCaptureVisibleTabRequest(message)) return false;
     captureSenderTab(sender).then(sendResponse);
