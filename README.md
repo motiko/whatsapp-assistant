@@ -6,12 +6,14 @@ A personal Chrome extension that runs on [WhatsApp Web](https://web.whatsapp.com
 
 Current state ([#2](https://github.com/motiko/whatsapp-assistant/issues/2) walking skeleton,
 [#5](https://github.com/motiko/whatsapp-assistant/issues/5) Date Ranges,
-[#6](https://github.com/motiko/whatsapp-assistant/issues/6) Context Band, file name and Download):
+[#6](https://github.com/motiko/whatsapp-assistant/issues/6) Context Band, file name and Download,
+[#3](https://github.com/motiko/whatsapp-assistant/issues/3) "Read more"):
 a button in the open Chat's header opens a panel where you pick a **Date Range** (From/To pickers
 or the Today, Last 7 days and Last 30 days presets). **Create Chat Record** scrolls the Chat to the
-range itself, captures as many screens as needed and copies them, stitched, to the clipboard as one
+range itself, expands every "Read more" so long messages show in full, captures as many screens as
+needed and copies them, stitched, to the clipboard as one
 PNG, with a **Context Band** above it; a **Download** button saves the same PNG. Full Chat,
-"Read more" expansion, progress and Cancel, and PDF output come in later tickets of
+progress and Cancel, and PDF output come in later tickets of
 [#1](https://github.com/motiko/whatsapp-assistant/issues/1).
 
 ## Requirements
@@ -101,7 +103,7 @@ Tests sit at two seams (see the spec's Testing Decisions in
 | `src/core/context-band.ts` | **Context Band**: its text (with optional extra lines) and drawing it above an image, or on its own |
 | `src/core/file-name.ts` | The file name a Chat Record is saved under, safe for every OS and Chrome's downloads |
 | `src/core/day-span.ts` | Local days (ISO `YYYY-MM-DD`) and the span of days a Chat Record covers |
-| `src/core/whatsapp-page.ts` | **WhatsApp Page** interface (Chat name, chat area, scroll position/height, scrolling, loaded date dividers and messages) and `PageNotRecognisedError` |
+| `src/core/whatsapp-page.ts` | **WhatsApp Page** interface (Chat name, chat area, scroll position/height, scrolling, loaded date dividers and messages, expanding "Read more" within a span) and `PageNotRecognisedError` |
 | `src/core/camera.ts` | **Camera** interface (visible-tab bitmap + device pixel ratio) and `CaptureNotAllowedError` |
 | `src/whatsapp-web/` | **WhatsApp Web adapter**: the only code that knows WhatsApp Web's page. All selectors are in `selectors.ts`; reading divider labels ("Today", weekdays, locale dates) is in `divider-dates.ts`. |
 | `src/extension/` | Chrome-side pieces: the tab Camera, clipboard and download output, messages to the background worker |
@@ -169,3 +171,22 @@ Needs a logged-in WhatsApp Web, so it is not automated. Use a fresh `npm run bui
 - [ ] After creating, the panel says the Chat Record was copied and shows **Download PNG**. Click it: the file appears in your Downloads folder as `Chat history - <name> - <from> to <to>.png`, and the panel says it was downloaded under that name.
 - [ ] Download in a Chat whose name has `/`, `:` or emoji (including a joined one such as 👨‍👩‍👧 or a flag): the file saves; `/` and `:` show as `_`, emoji are kept (a joined emoji appears as its parts, e.g. 👨👩👧).
 - [ ] Close and reopen the panel: **Download PNG** is gone until a new Chat Record is made.
+
+## Manual smoke checklist ("Read more", [#3](https://github.com/motiko/whatsapp-assistant/issues/3))
+
+The "Read more" selector (`.read-more-button` in `src/whatsapp-web/selectors.ts`) and the snapshot it is
+tested against are synthetic, so these checks are the first proof it works on the real page.
+
+- [ ] In a Chat, send or find a message long enough that WhatsApp Web cuts it short with "Read more". Leave it
+      cut short, then record a Date Range containing it: in the PNG the message shows its whole text, with no
+      "Read more", and the stitched image has no gap, cut or repeated rows around it or below it.
+- [ ] The same with the long message straddling a screen boundary (scroll so it sits at the bottom of the chat
+      area before recording a range that starts a screen or so above it) and as the very last message of the
+      range: the Chat Record ends right after its full text.
+- [ ] A very long message (several thousand characters) that WhatsApp may expand in steps: the whole text is in
+      the Chat Record.
+- [ ] Long messages outside the range are left as they were (cut short) if they never came on screen; ones that
+      did may be expanded, which is harmless.
+- [ ] A long message with a link, a quoted reply, and one in a group Chat: all expanded.
+- [ ] If the panel says the page wasn't recognised right after expanding, note what "Read more" looks like in
+      DevTools (element, class, role) so the selector and the snapshot can be fixed.
