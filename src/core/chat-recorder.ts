@@ -209,7 +209,7 @@ async function recordVisible(run: Run): Promise<ChatRecordOutcome> {
   const chatName = run.page.chatName();
   const area = run.page.chatArea();
   const takenAt = run.clock();
-  const screenshot = await run.camera.capture();
+  const screenshot = await captureChatArea(run, area);
   run.checkpoint();
   run.onProgress({ screensCaptured: 1 });
   const { devicePixelRatio } = screenshot;
@@ -654,7 +654,7 @@ async function walkCatching(
  * row whose top has been captured.
  */
 async function walk(run: Run, area: Rect, start: WalkStart, end: WalkEnd, walked: Walked): Promise<void> {
-  const { page, camera } = run;
+  const { page } = run;
   const to = end.kind === 'day' ? end.to : afterEveryDay;
   const dividerRows = new Map(start.dividerRows);
   /** The day at row 0. A divider of a later day above row 0 still dates the messages below it. */
@@ -729,7 +729,7 @@ async function walk(run: Run, area: Rect, start: WalkStart, end: WalkEnd, walked
     }
     missedScrolls = 0;
     if (covered < Math.min(visibleTo, endRow)) {
-      const screenshot = await camera.capture();
+      const screenshot = await captureChatArea(run, area);
       run.checkpoint();
       walked.devicePixelRatio = screenshot.devicePixelRatio;
       const sliceTo = Math.min(visibleTo, endRow);
@@ -749,6 +749,22 @@ async function walk(run: Run, area: Rect, start: WalkStart, end: WalkEnd, walked
     if (atBottom) throw new Error('WhatsApp Web stopped scrolling before the end of the range');
     await page.scrollTo(origin + covered - captureOverlap);
   }
+}
+
+/**
+ * Captures the screen, checking that the chat area is still where it was
+ * measured at the start: if it moved or changed size (the window was resized,
+ * a browser bar appeared or closed), the screenshot would be cut in the wrong
+ * place, so the run fails instead.
+ */
+async function captureChatArea(run: Run, area: Rect) {
+  const screenshot = await run.camera.capture();
+  const now = run.page.chatArea();
+  if (now.left !== area.left || now.top !== area.top || now.width !== area.width || now.height !== area.height) {
+    screenshot.bitmap.close();
+    throw new Error('the chat area moved or changed size (was the window resized?)');
+  }
+  return screenshot;
 }
 
 /**

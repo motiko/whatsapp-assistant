@@ -863,6 +863,49 @@ describe('the Camera of one Chat Record', () => {
   });
 });
 
+describe('a Chat Record while the chat area moves or changes size', () => {
+  // For example Chrome's debugging bar appearing or closing, or the window
+  // being resized: the screen no longer matches the chat area measured.
+  function resizedAfter(captures: number) {
+    const fake = createFakeWhatsAppPage({ chatName: 'Alice', chatArea, chat: sixDays });
+    let taken = 0;
+    const page: WhatsAppPage = {
+      ...fake,
+      chatArea: () => (taken > captures ? { ...chatArea, height: chatArea.height - 57 } : fake.chatArea()),
+    };
+    const inner = createFakeCamera({ viewport, page: fake });
+    const camera: Camera = {
+      capture: () => {
+        taken += 1;
+        return inner.capture();
+      },
+    };
+    return createChatRecorder({ page, camera });
+  }
+
+  test('stops, keeping what was captured before it changed as a Partial Chat Record', async () => {
+    const recorder = resizedAfter(1);
+
+    const outcome = await recorder.record({ kind: 'date-range', from: '2026-11-02', to: '2026-11-04' });
+
+    expect(outcome).toMatchObject({
+      kind: 'partial',
+      reason: 'capture-failed',
+      detail: 'the chat area moved or changed size (was the window resized?)',
+      // Only the first screen (2 Nov) is kept.
+      continuation: { lastMessage: { day: '2026-11-02' } },
+    });
+  });
+
+  test('fails, producing nothing, when it changes before the first screen is captured', async () => {
+    const recorder = resizedAfter(0);
+
+    const outcome = await recorder.record({ kind: 'date-range', from: '2026-11-02', to: '2026-11-04' });
+
+    expect(outcome).toMatchObject({ kind: 'failed', reason: 'capture-failed', detail: 'the chat area moved or changed size (was the window resized?)' });
+  });
+});
+
 describe('a Chat Record that fails part-way', () => {
   // The first screen of 2-4 Nov shows Chat positions 540-1218: 2 Nov (540-1080)
   // and 3 Nov's divider and first message (1080-1220), cut off at 1218. So the
