@@ -69,5 +69,6 @@ export function createFakeWhatsAppPage(options: {
       const to = scrollTop + 2 * options.chatArea.height;
       return items.filter((item) => item.bottom > from && item.top < to).map((item) => ({ ...item }));
     },
+    async expandReadMore() {},
   };
 }

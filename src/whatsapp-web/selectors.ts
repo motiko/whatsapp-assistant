@@ -19,4 +19,6 @@ export const selectors = {
   messageListRow: '[role="row"]',
   /** Present inside a row that is a message (its id names the Chat and the message). */
   message: '[data-id]',
+  /** The "Read more" button inside a message WhatsApp Web shows cut short. */
+  readMore: '.read-more-button',
 } as const;

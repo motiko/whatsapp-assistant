@@ -18,6 +18,7 @@ today's WhatsApp Web. Replace them with real snapshots as soon as possible.
 | `one-to-one-chat.html` | An open one-to-one Chat, light theme |
 | `group-chat.html` | An open group Chat (sender names on incoming messages), light theme |
 | `multi-day-chat.html` | A one-to-one Chat over five days (date dividers "28/10/2026", "03/11/2026", "Monday", "Yesterday", "Today" as of Wed 11 Nov 2026, in the en-GB date order), with an "unread messages" banner, long enough to scroll. It fixes every row's height (see its `<style>`) so the tests can state exact positions. |
+| `read-more-chat.html` | A one-to-one Chat of one day ("Today") in which three long messages are cut short behind a "Read more" button (`.read-more-button`, `role="button"`), long enough to scroll. Like `multi-day-chat.html` it fixes its layout (a 20px line of text, see its `<style>`) so the tests can state exact positions. A static file cannot expand anything, so the tests add WhatsApp Web's click behaviour with `../testing/emulate-read-more.ts`; with a real snapshot, check which element "Read more" really is and what a click on it does. |
 | `unrelated-page.html` | A page that is not WhatsApp Web's Chat view |
 
 The adapter reads divider labels relative to a given "today" and locale, so tests of

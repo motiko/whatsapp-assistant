@@ -5,6 +5,8 @@ import oneToOneChat from './fixtures/one-to-one-chat.html?raw';
 import groupChat from './fixtures/group-chat.html?raw';
 import unrelatedPage from './fixtures/unrelated-page.html?raw';
 import multiDayChat from './fixtures/multi-day-chat.html?raw';
+import readMoreChat from './fixtures/read-more-chat.html?raw';
+import { emulateReadMore } from './testing/emulate-read-more';
 import { PageNotRecognisedError } from '../core/whatsapp-page';
 
 afterEach(() => {
@@ -93,6 +95,72 @@ describe('WhatsApp Web adapter on a Chat spanning several days', () => {
 
     // "28/10/2026" is no date in a month/day/year locale.
     expect(() => page.loadedItems()).toThrow(PageNotRecognisedError);
+  });
+});
+
+describe('WhatsApp Web adapter on a Chat with long messages behind "Read more"', () => {
+  const options = { today: () => new Date(2026, 10, 11, 15, 30), locale: 'en-GB', settleMs: 0 };
+
+  async function openChat() {
+    const doc = await loadSnapshot(readMoreChat);
+    // Each "Read more" hides six more lines of 20px.
+    emulateReadMore(doc, 6);
+    return createWhatsAppWebPage(doc, options);
+  }
+
+  test('reports a truncated message as tall as it is shown, with "Read more"', async () => {
+    const page = await openChat();
+
+    // From the snapshot's fixed layout: list padding 12, the divider row 50,
+    // a message row 20 plus 20 a line, a truncated one three lines and "Read more".
+    expect(page.loadedItems().slice(0, 5)).toEqual([
+      { kind: 'date-divider', day: '2026-11-11', top: 12, bottom: 62 },
+      { kind: 'message', top: 62, bottom: 122 },
+      { kind: 'message', top: 122, bottom: 222 },
+      { kind: 'message', top: 222, bottom: 282 },
+      { kind: 'message', top: 282, bottom: 382 },
+    ]);
+  });
+
+  test('expands every message in the span, even one only partly in it, and the rows below move down', async () => {
+    const page = await openChat();
+
+    // The span cuts into the two truncated messages at 122-222 and 282-382.
+    await page.expandReadMore({ top: 150, bottom: 300 });
+
+    // Each grows by 100 (six more lines, without "Read more"); the third
+    // truncated message (742-842 before) is outside the span and stays as it was.
+    const messages = page.loadedItems().filter((item) => item.kind === 'message');
+    expect(messages.map(({ top, bottom }) => [top, bottom])).toEqual([
+      [62, 122],
+      [122, 322],
+      [322, 382],
+      [382, 582],
+      [582, 642],
+      [642, 702],
+      [702, 762],
+      [762, 822],
+      [822, 882],
+      [882, 942],
+      [942, 1042],
+      [1042, 1102],
+    ]);
+  });
+
+  test('leaves the Chat as it is when the span has no "Read more"', async () => {
+    const page = await openChat();
+    const before = page.loadedItems();
+
+    await page.expandReadMore({ top: 382, bottom: 742 });
+
+    expect(page.loadedItems()).toEqual(before);
+  });
+
+  test('raises "page not recognised" when clicking "Read more" does not show the rest', async () => {
+    // Without the emulated behaviour, "Read more" is just text.
+    const page = createWhatsAppWebPage(await loadSnapshot(readMoreChat), options);
+
+    await expect(page.expandReadMore({ top: 150, bottom: 300 })).rejects.toThrow(PageNotRecognisedError);
   });
 });
 
