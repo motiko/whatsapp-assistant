@@ -8,10 +8,13 @@ import { PageNotRecognisedError, type Rect, type WhatsAppPage } from './whatsapp
  * What to record:
  * - `date-range`: every message from the start of local day `from` to the end
  *   of local day `to` (both included, as WhatsApp Web's date dividers show days);
+ * - `full-chat`: every message WhatsApp Web can load, oldest to newest;
  * - `visible`: just the chat area currently on screen.
- * Full Chat joins this union in a later ticket.
  */
-export type ChatRecordRequest = { kind: 'visible' } | { kind: 'date-range'; from: LocalDay; to: LocalDay };
+export type ChatRecordRequest =
+  | { kind: 'visible' }
+  | { kind: 'date-range'; from: LocalDay; to: LocalDay }
+  | { kind: 'full-chat' };
 
 export interface ChatRecord {
   /** The Chat this record is of. */
@@ -25,6 +28,7 @@ export interface ChatRecord {
    * The days the Chat Record covers. For a Date Range: the first and last day
    * that have messages in the record (the first day's divider starts it, the
    * last day's last message ends it), which can be narrower than requested.
+   * For a Full Chat: the earliest day WhatsApp Web could load to the newest.
    */
   span: DaySpan;
   /** When the Chat Record was taken. */
@@ -43,6 +47,8 @@ export type ChatRecordOutcome =
   | { kind: 'record'; record: ChatRecord }
   /** The requested Date Range has no messages; nothing was made. */
   | { kind: 'no-messages'; from: LocalDay; to: LocalDay }
+  /** A Full Chat was requested but WhatsApp Web has no messages in the Chat; nothing was made. */
+  | { kind: 'empty-chat' }
   | { kind: 'failed'; reason: FailureReason; detail: string };
 
 export type FailureReason =
@@ -71,7 +77,7 @@ export function createChatRecorder({ page, camera, clock }: ChatRecorderDeps): C
   return {
     async record(request) {
       try {
-        return request.kind === 'date-range' ? await recordDateRange(deps, request) : await recordVisible(deps);
+        return request.kind === 'visible' ? await recordVisible(deps) : await recordDays(deps, request);
       } catch (error) {
         return { kind: 'failed', reason: failureReason(error), detail: errorMessage(error) };
       }
@@ -135,13 +141,21 @@ const captureOverlap = 8;
 /** Upper bound on scroll stops, so a page that never settles cannot loop forever. */
 const maxScrollStops = 10_000;
 
-async function recordDateRange(
+/**
+ * Days before and after every real day, so a Full Chat is the Date Range
+ * between them: its start is never reached, so every older message is loaded.
+ */
+const beforeEveryDay: LocalDay = '0000-00-00';
+const afterEveryDay: LocalDay = '9999-99-99';
+
+async function recordDays(
   deps: Deps,
-  request: { from: LocalDay; to: LocalDay },
+  request: { kind: 'date-range'; from: LocalDay; to: LocalDay } | { kind: 'full-chat' },
 ): Promise<ChatRecordOutcome> {
   const { page, camera } = deps;
-  const { from, to } = request;
-  const noMessages: ChatRecordOutcome = { kind: 'no-messages', from, to };
+  const fullChat = request.kind === 'full-chat';
+  const { from, to } = fullChat ? { from: beforeEveryDay, to: afterEveryDay } : request;
+  const noMessages: ChatRecordOutcome = fullChat ? { kind: 'empty-chat' } : { kind: 'no-messages', from, to };
   const chatName = page.chatName();
   const area = page.chatArea();
   const takenAt = deps.clock();
@@ -208,8 +222,12 @@ async function recordDateRange(
   if (!lastInRange) return noMessages;
   const pixels = stitch(slices, area, devicePixelRatio, lastInRange.row);
   const span = { from: first.day, to: lastInRange.day };
-  const historyIncomplete = !start.startReached;
-  const notes = historyIncomplete ? [`Requested from ${from}; earliest available ${first.day}`] : [];
+  const historyIncomplete = !fullChat && !start.startReached;
+  const notes = fullChat
+    ? [`Full Chat; earliest available ${first.day}`]
+    : historyIncomplete
+      ? [`Requested from ${from}; earliest available ${first.day}`]
+      : [];
   return finishRecord({ chatName, span, takenAt, pixels, devicePixelRatio, historyIncomplete, notes });
 }
 
