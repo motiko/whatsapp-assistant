@@ -262,6 +262,12 @@ function visibleChatSpan(takenAt: Date): DaySpan {
  */
 const captureOverlap = 8;
 
+/**
+ * How many times in a row to scroll again when WhatsApp Web has shifted the
+ * list so that the screen lands below where the Chat Record continues.
+ */
+const maxMissedScrolls = 3;
+
 /** Upper bound on scroll stops, so a page that never settles cannot loop forever. */
 const maxScrollStops = 10_000;
 
@@ -307,6 +313,8 @@ async function recordDays(
   let lastInRange: { row: number; day: LocalDay } | undefined;
   let endKnown = false;
   let covered = 0;
+  /** Scrolls in a row that landed below where the Chat Record continues. */
+  let missedScrolls = 0;
   let devicePixelRatio = 1;
   const slices: Slice[] = [];
 
@@ -342,7 +350,18 @@ async function recordDays(
     const visibleTo = visibleFrom + area.height;
     const end = endKnown ? (lastInRange?.row ?? 0) : Infinity;
 
-    if (visibleFrom > covered) throw new Error('WhatsApp Web did not scroll to where the Chat Record continues');
+    if (visibleFrom > covered) {
+      // WhatsApp Web shifted the list after the scroll target was worked out
+      // (from positions read before it settled): scroll again from the
+      // positions just re-anchored.
+      missedScrolls += 1;
+      if (missedScrolls > maxMissedScrolls) {
+        throw new Error('WhatsApp Web did not scroll to where the Chat Record continues');
+      }
+      await page.scrollTo(origin + covered - captureOverlap);
+      continue;
+    }
+    missedScrolls = 0;
     if (covered < Math.min(visibleTo, end)) {
       const screenshot = await camera.capture();
       run.checkpoint();

@@ -28,6 +28,13 @@ export interface FakeWhatsAppPage extends WhatsAppPage {
    * message list right now. Without `windowRows` it is the same as `scrollTop()`.
    */
   chatPositionShown(): number;
+  /**
+   * Plays WhatsApp Web unloading rows on its own, a moment after a scroll
+   * has settled: drops up to `count` rows from the top of the message list,
+   * only ones wholly above the screen, keeping the screen where it is (so
+   * every content position, and the scroll position, shift up).
+   */
+  dropRowsAbove(count: number): void;
 }
 
 /** Every date divider in a fake Chat is this tall (CSS px). */
@@ -193,5 +200,11 @@ export function createFakeWhatsAppPage(options: {
     },
     readMoreOnScreen: () => truncatedIn(windowTop() + scrollTop, windowTop() + scrollTop + height).length > 0,
     chatPositionShown: () => windowTop() + scrollTop,
+    dropRowsAbove(count) {
+      const screenTop = windowTop() + scrollTop;
+      let drop = first;
+      while (drop < first + count && drop < last - 1 && rows[drop]!.bottom <= screenTop) drop += 1;
+      moveFirst(drop);
+    },
   };
 }

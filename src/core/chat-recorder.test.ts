@@ -349,6 +349,44 @@ describe('a Date Range while WhatsApp Web slides its message list', () => {
   });
 });
 
+describe('a Date Range when WhatsApp Web shifts its message list after the first day is found', () => {
+  test('still starts exactly at the first day\'s divider and stitches every row once', async () => {
+    const fake = createFakeWhatsAppPage({ chatName: 'Alice', chatArea, chat: sixDays, windowRows: 30 });
+    // Just as the recorder scrolls to 2 Nov's divider where it last saw it,
+    // WhatsApp Web drops the two rows at the top of its list (1 Nov's divider
+    // and first message, 140px), so that position is 140px off.
+    let dividerTop: number | undefined;
+    let dropped = false;
+    const page: WhatsAppPage = {
+      ...fake,
+      loadedItems() {
+        const items = fake.loadedItems();
+        const divider = items.find((item) => item.kind === 'date-divider' && item.day === '2026-11-02');
+        if (divider) dividerTop = divider.top;
+        return items;
+      },
+      async scrollTo(top) {
+        if (top === dividerTop && !dropped) {
+          dropped = true;
+          fake.dropRowsAbove(2);
+        }
+        await fake.scrollTo(top);
+      },
+    };
+    const recorder = createChatRecorder({ page, camera: createFakeCamera({ viewport, page: fake }) });
+
+    const outcome = await recorder.record({ kind: 'date-range', from: '2026-11-02', to: '2026-11-04' });
+
+    expect(dropped).toBe(true);
+    expect(outcome.kind === 'failed' ? outcome.detail : outcome.kind).toBe('record');
+    const image = await recordedImage(outcome);
+    expect(image.height).toBe(1620);
+    for (let row = 0; row < image.height; row++) {
+      expect(image.at(0, row)).toEqual({ x: 400, y: 540 + row });
+    }
+  });
+});
+
 describe('long messages behind "Read more" in a Date Range', () => {
   /**
    * A recorder of `chat`, and how many of its captures showed a message
