@@ -18,6 +18,8 @@ export type CreateResult =
     }
   /** The chosen Date Range has no messages; nothing was made. */
   | { kind: 'no-messages'; from: LocalDay; to: LocalDay }
+  /** The user cancelled it; nothing was made. */
+  | { kind: 'cancelled' }
   | { kind: 'failed'; reason: FailureReason | 'busy'; detail: string };
 
 export interface RecordPanel {
@@ -132,6 +134,10 @@ export function createRecordPanel(
       .then((result) => {
         if (result.kind === 'failed') {
           show(failureMessage(result.reason, result.detail), 'error');
+          return;
+        }
+        if (result.kind === 'cancelled') {
+          show('Cancelled. No Chat Record was made.', 'error');
           return;
         }
         if (result.kind === 'no-messages') {

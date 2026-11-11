@@ -32,7 +32,7 @@ export default defineContentScript({
         return Promise.all([outcome, copied.then(() => undefined, (error: unknown) => error)])
           .then(([o, clipboardError]): CreateResult => {
             if (o.kind === 'failed') return o;
-            if (o.kind === 'no-messages') return o;
+            if (o.kind === 'no-messages' || o.kind === 'cancelled') return o;
             const file = { name: o.record.fileName, image: o.record.image };
             if (clipboardError) return { kind: 'made', file, clipboard: { copied: false, detail: String(clipboardError) } };
             return { kind: 'made', file, clipboard: { copied: true } };

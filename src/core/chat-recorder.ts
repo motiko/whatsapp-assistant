@@ -37,6 +37,8 @@ export type ChatRecordOutcome =
   | { kind: 'record'; record: ChatRecord }
   /** The requested Date Range has no messages; nothing was made. */
   | { kind: 'no-messages'; from: LocalDay; to: LocalDay }
+  /** The record was cancelled through its signal; nothing was made. */
+  | { kind: 'cancelled' }
   | { kind: 'failed'; reason: FailureReason; detail: string };
 
 export type FailureReason =
@@ -61,6 +63,11 @@ export interface RecordProgress {
 export interface RecordOptions {
   /** Called once per screen captured. */
   onProgress?: (progress: RecordProgress) => void;
+  /**
+   * Aborting it cancels the record: it stops scrolling and capturing as soon
+   * as it can and resolves to `cancelled`, producing nothing.
+   */
+  signal?: AbortSignal;
 }
 
 export interface ChatRecorder {
@@ -79,16 +86,32 @@ type Deps = Required<ChatRecorderDeps>;
 /** One recording's deps and options. */
 interface Run extends Deps {
   onProgress: (progress: RecordProgress) => void;
+  /** Throws `Cancelled` if the record has been cancelled. Call it after every wait. */
+  checkpoint: () => void;
 }
+
+/** Unwinds a cancelled record. */
+class Cancelled extends Error {}
 
 export function createChatRecorder({ page, camera, clock }: ChatRecorderDeps): ChatRecorder {
   const deps: Deps = { page, camera, clock: clock ?? (() => new Date()) };
   return {
     async record(request, options = {}) {
-      const run: Run = { ...deps, onProgress: options.onProgress ?? (() => {}) };
+      const { signal } = options;
+      const run: Run = {
+        ...deps,
+        onProgress: options.onProgress ?? (() => {}),
+        checkpoint() {
+          if (signal?.aborted) throw new Cancelled();
+        },
+      };
       try {
-        return request.kind === 'date-range' ? await recordDateRange(run, request) : await recordVisible(run);
+        run.checkpoint();
+        const outcome = request.kind === 'date-range' ? await recordDateRange(run, request) : await recordVisible(run);
+        run.checkpoint();
+        return outcome;
       } catch (error) {
+        if (error instanceof Cancelled || signal?.aborted) return { kind: 'cancelled' };
         return { kind: 'failed', reason: failureReason(error), detail: errorMessage(error) };
       }
     },
@@ -100,6 +123,7 @@ async function recordVisible(run: Run): Promise<ChatRecordOutcome> {
   const area = run.page.chatArea();
   const takenAt = run.clock();
   const screenshot = await run.camera.capture();
+  run.checkpoint();
   run.onProgress({ screensCaptured: 1 });
   const pixels = crop(screenshot.bitmap, area, screenshot.devicePixelRatio);
   const span = visibleChatSpan(takenAt);
@@ -156,7 +180,7 @@ async function recordDateRange(
   const area = page.chatArea();
   const takenAt = run.clock();
 
-  const first = await scrollToFirstDivider(page, from, area.height);
+  const first = await scrollToFirstDivider(run, from, area.height);
   if (!first || first.day > to) return noMessages;
 
   // Walk down one chat-area height at a time from the first day's divider.
@@ -173,6 +197,7 @@ async function recordDateRange(
 
   await page.scrollTo(origin);
   for (let stop = 0; ; stop++) {
+    run.checkpoint();
     if (stop >= maxScrollStops) throw new Error('WhatsApp Web did not stop scrolling');
     const items = page.loadedItems();
     const anchor = items.find((item) => item.kind === 'date-divider' && dividerRows.has(item.day));
@@ -204,6 +229,7 @@ async function recordDateRange(
     if (visibleFrom > covered) throw new Error('WhatsApp Web did not scroll to where the Chat Record continues');
     if (covered < Math.min(visibleTo, end)) {
       const screenshot = await camera.capture();
+      run.checkpoint();
       devicePixelRatio = screenshot.devicePixelRatio;
       const sliceTo = Math.min(visibleTo, end);
       slices.push(await cutSlice(screenshot.bitmap, area, devicePixelRatio, covered, sliceTo, visibleFrom));
@@ -235,10 +261,12 @@ function dayAt(dividerRows: Map<LocalDay, number>, row: number): LocalDay {
  * loaded, and returns it (in content positions read at the last stop), or
  * undefined if no day on or after `from` has messages.
  */
-async function scrollToFirstDivider(page: WhatsAppPage, from: LocalDay, step: number) {
+async function scrollToFirstDivider(run: Run, from: LocalDay, step: number) {
+  const { page } = run;
   let goingDown = false;
   let sawMessages = false;
   for (let stop = 0; stop < maxScrollStops; stop++) {
+    run.checkpoint();
     const items = page.loadedItems();
     const dividers = items.flatMap((item) => (item.kind === 'date-divider' ? [item] : []));
     sawMessages ||= items.some((item) => item.kind === 'message');

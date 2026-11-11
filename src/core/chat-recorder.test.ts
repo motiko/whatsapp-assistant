@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { CaptureNotAllowedError } from './camera';
+import { CaptureNotAllowedError, type Camera } from './camera';
 import { createChatRecorder, type ChatRecordOutcome } from './chat-recorder';
 import { drawContextBand } from './context-band';
 import { PageNotRecognisedError, type WhatsAppPage } from './whatsapp-page';
@@ -409,6 +409,62 @@ describe('progress while a Date Range is recorded', () => {
       { screensCaptured: 2, reachedDay: '2026-11-04' },
       { screensCaptured: 3, reachedDay: '2026-11-04' },
     ]);
+  });
+});
+
+/** A Camera that counts its captures. */
+function countingCamera(camera: Camera) {
+  const counted = { captures: 0, capture: () => camera.capture().finally(() => counted.captures++) };
+  return counted;
+}
+
+describe('cancelling a Chat Record', () => {
+  test('part-way stops capturing and produces nothing', async () => {
+    const page = createFakeWhatsAppPage({ chatName: 'Alice', chatArea, chat: sixDays });
+    const camera = countingCamera(createFakeCamera({ viewport, page }));
+    const recorder = createChatRecorder({ page, camera });
+    const cancel = new AbortController();
+
+    const outcome = await recorder.record(
+      { kind: 'date-range', from: '2026-11-02', to: '2026-11-04' },
+      { signal: cancel.signal, onProgress: ({ screensCaptured }) => screensCaptured === 1 && cancel.abort() },
+    );
+
+    expect(outcome).toEqual({ kind: 'cancelled' });
+    expect(camera.captures).toBe(1); // a whole record takes three
+  });
+
+  test('while scrolling to the first day captures nothing', async () => {
+    const fake = createFakeWhatsAppPage({ chatName: 'Alice', chatArea, chat: sixDays });
+    const cancel = new AbortController();
+    const page: WhatsAppPage = {
+      ...fake,
+      async scrollTo(top) {
+        await fake.scrollTo(top);
+        cancel.abort();
+      },
+    };
+    const camera = countingCamera(createFakeCamera({ viewport, page }));
+    const recorder = createChatRecorder({ page, camera });
+
+    const outcome = await recorder.record(
+      { kind: 'date-range', from: '2026-11-01', to: '2026-11-02' },
+      { signal: cancel.signal },
+    );
+
+    expect(outcome).toEqual({ kind: 'cancelled' });
+    expect(camera.captures).toBe(0);
+  });
+
+  test('before it starts captures nothing', async () => {
+    const page = createFakeWhatsAppPage({ chatName: 'Alice', chatArea, chat: sixDays });
+    const camera = countingCamera(createFakeCamera({ viewport, page }));
+    const recorder = createChatRecorder({ page, camera });
+
+    const outcome = await recorder.record({ kind: 'visible' }, { signal: AbortSignal.abort() });
+
+    expect(outcome).toEqual({ kind: 'cancelled' });
+    expect(camera.captures).toBe(0);
   });
 });
 
