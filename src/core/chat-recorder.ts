@@ -1,4 +1,7 @@
 import { CaptureNotAllowedError, type Camera } from './camera';
+import { contextBandText, withContextBand } from './context-band';
+import { localDayOf, type DaySpan } from './day-span';
+import { chatRecordFileName } from './file-name';
 import { PageNotRecognisedError, type Rect, type WhatsAppPage } from './whatsapp-page';
 
 /**
@@ -11,8 +14,16 @@ export interface ChatRecord {
   /** The Chat this record is of. */
   chatName: string;
   format: 'png';
-  /** WhatsApp Web's own pixels, encoded as `format`. */
+  /** The Context Band above WhatsApp Web's own pixels, encoded as `format`. */
   image: Blob;
+  /** The name to save it under, for example `Chat history - Alice - 2026-11-11.png`. */
+  fileName: string;
+  /** The days the Chat Record covers. */
+  span: DaySpan;
+  /** When the Chat Record was taken. */
+  takenAt: Date;
+  /** The Context Band's text, one entry per line. */
+  contextBand: string[];
 }
 
 export type ChatRecordOutcome =
@@ -31,11 +42,19 @@ export interface ChatRecorder {
   record(request: ChatRecordRequest): Promise<ChatRecordOutcome>;
 }
 
-export function createChatRecorder(deps: { page: WhatsAppPage; camera: Camera }): ChatRecorder {
+export interface ChatRecorderDeps {
+  page: WhatsAppPage;
+  camera: Camera;
+  /** The current time; tells when a Chat Record was taken. Defaults to the system clock. */
+  clock?: () => Date;
+}
+
+export function createChatRecorder(deps: ChatRecorderDeps): ChatRecorder {
+  const clock = deps.clock ?? (() => new Date());
   return {
     async record() {
       try {
-        return await recordVisible(deps);
+        return await recordVisible({ ...deps, clock });
       } catch (error) {
         return { kind: 'failed', reason: failureReason(error), detail: errorMessage(error) };
       }
@@ -43,12 +62,28 @@ export function createChatRecorder(deps: { page: WhatsAppPage; camera: Camera })
   };
 }
 
-async function recordVisible(deps: { page: WhatsAppPage; camera: Camera }): Promise<ChatRecordOutcome> {
+async function recordVisible(deps: Required<ChatRecorderDeps>): Promise<ChatRecordOutcome> {
   const chatName = deps.page.chatName();
   const area = deps.page.chatArea();
+  const takenAt = deps.clock();
   const screenshot = await deps.camera.capture();
-  const image = await cropToPng(screenshot.bitmap, area, screenshot.devicePixelRatio);
-  return { kind: 'record', record: { chatName, format: 'png', image } };
+  const pixels = crop(screenshot.bitmap, area, screenshot.devicePixelRatio);
+  const span = visibleChatSpan(takenAt);
+  const contextBand = contextBandText({ chatName, span, takenAt });
+  const withBand = withContextBand(pixels, contextBand, screenshot.devicePixelRatio);
+  const image = await withBand.convertToBlob({ type: 'image/png' });
+  const fileName = chatRecordFileName(chatName, span, 'png');
+  return { kind: 'record', record: { chatName, format: 'png', image, fileName, span, takenAt, contextBand } };
+}
+
+/**
+ * The days a record of the visible chat covers. The recorder does not read
+ * the dates of the messages on screen yet, so this is the day the record was
+ * taken; Date Range requests (#5) replace it with the span actually captured.
+ */
+function visibleChatSpan(takenAt: Date): DaySpan {
+  const today = localDayOf(takenAt);
+  return { from: today, to: today };
 }
 
 function failureReason(error: unknown): FailureReason {
@@ -61,12 +96,12 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-async function cropToPng(bitmap: ImageBitmap, area: Rect, devicePixelRatio: number): Promise<Blob> {
+function crop(bitmap: ImageBitmap, area: Rect, devicePixelRatio: number): OffscreenCanvas {
   const left = Math.round(area.left * devicePixelRatio);
   const top = Math.round(area.top * devicePixelRatio);
   const width = Math.round(area.width * devicePixelRatio);
   const height = Math.round(area.height * devicePixelRatio);
   const canvas = new OffscreenCanvas(width, height);
   canvas.getContext('2d')!.drawImage(bitmap, left, top, width, height, 0, 0, width, height);
-  return canvas.convertToBlob({ type: 'image/png' });
+  return canvas;
 }

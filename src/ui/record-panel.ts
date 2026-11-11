@@ -1,7 +1,20 @@
 import type { FailureReason } from '../core/chat-recorder';
 
+/** A Chat Record ready to save: its image and the file name to save it under. */
+export interface RecordFile {
+  name: string;
+  image: Blob;
+}
+
 /** What became of a click on Create Chat Record. */
-export type CreateResult = { kind: 'copied' } | { kind: 'failed'; reason: FailureReason | 'clipboard-failed'; detail: string };
+export type CreateResult =
+  | {
+      kind: 'made';
+      file: RecordFile;
+      /** Whether the Chat Record reached the clipboard, and why not if it didn't. */
+      clipboard: { copied: true } | { copied: false; detail: string };
+    }
+  | { kind: 'failed'; reason: FailureReason | 'busy'; detail: string };
 
 export interface RecordPanel {
   /** The header button; place it with `keepInChatHeader`. */
@@ -22,6 +35,8 @@ export function createRecordPanel(
     chatName: () => string | undefined;
     /** Must start any clipboard write synchronously (see `copyPngToClipboard`). */
     createChatRecord: () => Promise<CreateResult>;
+    /** Saves the file to the Downloads folder; throws if it can't. */
+    download: (file: RecordFile) => void;
   },
 ): RecordPanel {
   const buttonHost = doc.createElement('whatsapp-assistant-button');
@@ -36,21 +51,31 @@ export function createRecordPanel(
     <section role="dialog" aria-labelledby="title" hidden>
       <header><h2 id="title">Chat Record</h2><button type="button" class="close" aria-label="Close">×</button></header>
       <p class="chat">Chat: <strong></strong></p>
-      <p class="hint">Copies the messages on screen to the clipboard as an image.</p>
+      <p class="hint">Copies the messages on screen to the clipboard as an image, with a band above them naming the Chat, the day and when it was taken.</p>
       <button type="button" class="create">Create Chat Record</button>
       <p class="status" role="status" aria-live="polite"></p>
+      <button type="button" class="download" hidden>Download PNG</button>
     </section>`;
   const dialog = panelRoot.querySelector('section')!;
   const chatLabel = panelRoot.querySelector('.chat strong')!;
   const createButton = panelRoot.querySelector<HTMLButtonElement>('.create')!;
   const status = panelRoot.querySelector<HTMLElement>('.status')!;
+  const downloadButton = panelRoot.querySelector<HTMLButtonElement>('.download')!;
   doc.body.append(panelHost);
+
+  /** The Chat Record last made, kept in memory only while the panel offers to download it. */
+  let lastRecord: RecordFile | undefined;
+  const offerDownload = (file: RecordFile | undefined) => {
+    lastRecord = file;
+    downloadButton.hidden = file === undefined;
+  };
 
   const open = () => {
     if (!panelHost.isConnected) doc.body.append(panelHost);
     chatLabel.textContent = options.chatName() ?? 'unknown';
     status.textContent = '';
     status.className = 'status';
+    offerDownload(undefined);
     dialog.hidden = false;
     position();
     createButton.focus();
@@ -82,16 +107,32 @@ export function createRecordPanel(
 
   createButton.addEventListener('click', () => {
     createButton.disabled = true;
+    offerDownload(undefined);
     show('Making the Chat Record…', 'working');
     options
       .createChatRecord()
       .then((result) => {
-        if (result.kind === 'copied') show('Chat Record copied to the clipboard as a PNG.', 'done');
-        else show(failureMessage(result.reason, result.detail), 'error');
+        if (result.kind === 'failed') {
+          show(failureMessage(result.reason, result.detail), 'error');
+          return;
+        }
+        offerDownload(result.file);
+        if (result.clipboard.copied) show('Chat Record copied to the clipboard as a PNG.', 'done');
+        else show(`The Chat Record couldn't be copied to the clipboard (${result.clipboard.detail}). You can download it instead.`, 'error');
       })
       .finally(() => {
         createButton.disabled = false;
       });
+  });
+
+  downloadButton.addEventListener('click', () => {
+    if (!lastRecord) return;
+    try {
+      options.download(lastRecord);
+      show(`Chat Record downloaded to your Downloads folder as “${lastRecord.name}”.`, 'done');
+    } catch (error) {
+      show(`The Chat Record couldn't be downloaded (${error instanceof Error ? error.message : String(error)}).`, 'error');
+    }
   });
 
   return {
@@ -116,8 +157,8 @@ function failureMessage(reason: Extract<CreateResult, { kind: 'failed' }>['reaso
       return "Chrome hasn't allowed this extension to capture this tab yet. Click the WhatsApp Assistant icon in Chrome's toolbar once, then try again.";
     case 'capture-failed':
       return `The screen couldn't be captured (${detail}). Nothing was copied.`;
-    case 'clipboard-failed':
-      return `The Chat Record couldn't be copied to the clipboard (${detail}).`;
+    case 'busy':
+      return 'A Chat Record is already being made. Wait for it to finish.';
   }
 }
 
@@ -148,6 +189,10 @@ const panelStyles = `
   .create { width: 100%; margin-top: 4px; padding: 9px 12px; border: 0; border-radius: 20px;
     background: #00a884; color: #fff; font: inherit; font-weight: 600; cursor: pointer; }
   .create:disabled { opacity: .6; cursor: progress; }
+  .download { width: 100%; padding: 8px 12px; border: 1px solid #00a884; border-radius: 20px;
+    background: transparent; color: #008069; font: inherit; font-weight: 600; cursor: pointer; }
+  :host-context(body.dark) .download { color: #25d366; }
+  .download[hidden] { display: none; }
   .status:empty { display: none; }
   .status.error { color: #c0392b; }
   :host-context(body.dark) .status.error { color: #f28b82; }

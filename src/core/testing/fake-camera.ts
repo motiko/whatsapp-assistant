@@ -56,5 +56,16 @@ export async function readScreenPositions(image: Blob) {
       const b = data[i + 2]!;
       return { x: ((b >> 4) << 8) | r, y: ((b & 0x0f) << 8) | g };
     },
+    /** How many distinct colours the given rectangle of the image has. */
+    colourCount(left: number, top: number, width: number, height: number) {
+      const colours = new Set<number>();
+      for (let y = top; y < top + height; y++) {
+        for (let x = left; x < left + width; x++) {
+          const i = (y * bitmap.width + x) * 4;
+          colours.add((data[i]! << 16) | (data[i + 1]! << 8) | data[i + 2]!);
+        }
+      }
+      return colours.size;
+    },
   };
 }

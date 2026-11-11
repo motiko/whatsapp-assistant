@@ -10,6 +10,8 @@ export default defineConfig({
     // activeTab: Chrome only lets captureVisibleTab run with activeTab or
     // <all_urls>; activeTab keeps access to the tab the user picked.
     // clipboardWrite: writing the PNG to the clipboard.
+    // No `downloads`: Download clicks a download link in the content script,
+    // which needs no permission (see src/extension/download.ts).
     permissions: ['activeTab', 'clipboardWrite'],
     action: { default_title: 'WhatsApp Assistant: Chat Record' },
   },
