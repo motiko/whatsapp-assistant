@@ -2,7 +2,7 @@ import type { FailureReason } from '../core/chat-recorder';
 import type { LocalDay } from '../core/day-span';
 import { createDateRangeFields, dateRangeFieldsStyles, type DateRange } from './date-range-fields';
 
-/** A Chat Record ready to save: its image and the file name to save it under. */
+/** A Chat Record ready to save: its PNG or PDF and the file name (`.png` or `.pdf`) to save it under. */
 export interface RecordFile {
   name: string;
   image: Blob;
@@ -16,6 +16,8 @@ export type CreateResult =
       /** Whether the Chat Record reached the clipboard, and why not if it didn't. */
       clipboard: { copied: true } | { copied: false; detail: string };
     }
+  /** A Chat Record too long for one image: a PDF, which the panel downloads straight away. */
+  | { kind: 'made-pdf'; file: RecordFile }
   /** The chosen Date Range has no messages; nothing was made. */
   | { kind: 'no-messages'; from: LocalDay; to: LocalDay }
   | { kind: 'failed'; reason: FailureReason | 'busy'; detail: string };
@@ -57,7 +59,7 @@ export function createRecordPanel(
       <header><h2 id="title">Chat Record</h2><button type="button" class="close" aria-label="Close">×</button></header>
       <p class="chat">Chat: <strong></strong></p>
       <div class="range"></div>
-      <p class="hint">Copies the messages of these days to the clipboard as an image, with a band above them naming the Chat, the days and when it was taken. Keep this tab visible and leave it alone until it's done.</p>
+      <p class="hint">Copies the messages of these days to the clipboard as an image, with a band above them naming the Chat, the days and when it was taken. More than about ten screens of messages download as a PDF instead. Keep this tab visible and leave it alone until it's done.</p>
       <button type="button" class="create">Create Chat Record</button>
       <p class="status" role="status" aria-live="polite"></p>
       <button type="button" class="download" hidden>Download PNG</button>
@@ -81,6 +83,7 @@ export function createRecordPanel(
   const offerDownload = (file: RecordFile | undefined) => {
     lastRecord = file;
     downloadButton.hidden = file === undefined;
+    downloadButton.textContent = file?.name.endsWith('.pdf') ? 'Download PDF' : 'Download PNG';
   };
 
   const open = () => {
@@ -138,6 +141,10 @@ export function createRecordPanel(
           show(noMessagesText(result.from, result.to), 'error');
           return;
         }
+        if (result.kind === 'made-pdf') {
+          downloadPdf(result.file);
+          return;
+        }
         offerDownload(result.file);
         if (result.clipboard.copied) show('Chat Record copied to the clipboard as a PNG.', 'done');
         else show(`The Chat Record couldn't be copied to the clipboard (${result.clipboard.detail}). You can download it instead.`, 'error');
@@ -148,14 +155,25 @@ export function createRecordPanel(
       });
   });
 
-  downloadButton.addEventListener('click', () => {
-    if (!lastRecord) return;
+  const download = (file: RecordFile, done: string) => {
     try {
-      options.download(lastRecord);
-      show(`Chat Record downloaded to your Downloads folder as “${lastRecord.name}”.`, 'done');
+      options.download(file);
+      show(done, 'done');
+      return true;
     } catch (error) {
       show(`The Chat Record couldn't be downloaded (${error instanceof Error ? error.message : String(error)}).`, 'error');
+      return false;
     }
+  };
+  /** A PDF is never copied; it is downloaded as soon as it is made (or offered again if that fails). */
+  const downloadPdf = (file: RecordFile) => {
+    const done = `The Chat Record is more than about ten screens long, so it was downloaded as a PDF to your Downloads folder as “${file.name}”.`;
+    offerDownload(download(file, done) ? undefined : file);
+  };
+
+  downloadButton.addEventListener('click', () => {
+    if (!lastRecord) return;
+    download(lastRecord, `Chat Record downloaded to your Downloads folder as “${lastRecord.name}”.`);
   });
 
   return {
