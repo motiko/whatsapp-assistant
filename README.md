@@ -6,12 +6,14 @@ A personal Chrome extension that runs on [WhatsApp Web](https://web.whatsapp.com
 
 Current state ([#2](https://github.com/motiko/whatsapp-assistant/issues/2) walking skeleton,
 [#5](https://github.com/motiko/whatsapp-assistant/issues/5) Date Ranges,
-[#6](https://github.com/motiko/whatsapp-assistant/issues/6) Context Band, file name and Download):
+[#6](https://github.com/motiko/whatsapp-assistant/issues/6) Context Band, file name and Download,
+[#7](https://github.com/motiko/whatsapp-assistant/issues/7) Full Chat and incomplete history):
 a button in the open Chat's header opens a panel where you pick a **Date Range** (From/To pickers
-or the Today, Last 7 days and Last 30 days presets). **Create Chat Record** scrolls the Chat to the
+or the Today, Last 7 days and Last 30 days presets) or the **Full Chat**. **Create Chat Record** scrolls the Chat to the
 range itself, captures as many screens as needed and copies them, stitched, to the clipboard as one
-PNG, with a **Context Band** above it; a **Download** button saves the same PNG. Full Chat,
-"Read more" expansion, progress and Cancel, and PDF output come in later tickets of
+PNG, with a **Context Band** above it; a **Download** button saves the same PNG. It loads older
+messages as needed, including clicking WhatsApp Web's prompt to get them from the phone, and says
+in the Context Band when it couldn't get back as far as asked. "Read more" expansion, progress and Cancel, and PDF output come in later tickets of
 [#1](https://github.com/motiko/whatsapp-assistant/issues/1).
 
 ## Requirements
@@ -53,12 +55,19 @@ navigated away, and also opens the panel. If you skip it, the panel tells you to
 3. Pick **From** and **To** (To starts at today), or click **Today**, **Last 7 days** or
    **Last 30 days**. Days are whole days in your computer's timezone, both ends included, as
    WhatsApp Web's date dividers show them. From can't be after To, and neither in the future.
+   Or click **Full Chat** for every message WhatsApp Web can load (picking a date or another preset
+   goes back to a Date Range).
 4. Click **Create Chat Record** and leave the tab alone (visible, no scrolling) until it is done.
    The extension scrolls to the range, captures screen by screen (at most about two per second,
    Chrome's limit) and copies one PNG to the clipboard: from the top of the first day's date
    divider to the bottom of the last message of the last day, cropped to the chat area (no Chat
    list, header, message box, scrollbar or extension UI). A range with no messages says
-   "No messages between X and Y" and copies nothing.
+   "No messages between X and Y" and copies nothing. To reach the range it loads older messages,
+   clicking WhatsApp Web's "get older messages from your phone" prompt when it appears; a Full Chat
+   loads all of them first, so it can take a while (each load waits up to 5 seconds).
+   If WhatsApp Web runs out of older messages before the From day, the Chat Record starts at the
+   earliest day available and the Context Band says so: `Requested from <From>; earliest available
+   <day>`. A Full Chat's Context Band always ends `Full Chat; earliest available <day>`.
 5. Above the messages, in a separate white strip (the Context Band), are the Chat's name, the days
    the Chat Record actually covers (the first and last day with messages in the range, which can be
    narrower than the range you picked) and when it was taken (local time and UTC offset).
@@ -97,16 +106,16 @@ Tests sit at two seams (see the spec's Testing Decisions in
 
 | Path | Module |
 | --- | --- |
-| `src/core/chat-recorder.ts` | **Chat Recorder**: request (a Date Range, or the visible chat area) in, outcome out (a Chat Record, *no messages*, or *failed* with a reason). Range resolution, the scroll-and-capture loop, cropping, stitching and adding the Context Band. No Chrome or WhatsApp knowledge. |
+| `src/core/chat-recorder.ts` | **Chat Recorder**: request (a Date Range, the Full Chat, or the visible chat area) in, outcome out (a Chat Record, *no messages*, *empty chat*, or *failed* with a reason). Range resolution (loading older messages, incomplete history), the scroll-and-capture loop, cropping, stitching and adding the Context Band. No Chrome or WhatsApp knowledge. |
 | `src/core/context-band.ts` | **Context Band**: its text (with optional extra lines) and drawing it above an image, or on its own |
 | `src/core/file-name.ts` | The file name a Chat Record is saved under, safe for every OS and Chrome's downloads |
 | `src/core/day-span.ts` | Local days (ISO `YYYY-MM-DD`) and the span of days a Chat Record covers |
-| `src/core/whatsapp-page.ts` | **WhatsApp Page** interface (Chat name, chat area, scroll position/height, scrolling, loaded date dividers and messages) and `PageNotRecognisedError` |
+| `src/core/whatsapp-page.ts` | **WhatsApp Page** interface (Chat name, chat area, scroll position/height, scrolling, loaded date dividers and messages, loading older messages or saying there are none) and `PageNotRecognisedError` |
 | `src/core/camera.ts` | **Camera** interface (visible-tab bitmap + device pixel ratio) and `CaptureNotAllowedError` |
 | `src/whatsapp-web/` | **WhatsApp Web adapter**: the only code that knows WhatsApp Web's page. All selectors are in `selectors.ts`; reading divider labels ("Today", weekdays, locale dates) is in `divider-dates.ts`. |
 | `src/extension/` | Chrome-side pieces: the tab Camera, clipboard and download output, messages to the background worker |
 | `src/ui/record-panel.ts` | Header button and panel |
-| `src/ui/date-range-fields.ts` | The panel's From/To pickers, presets and validation |
+| `src/ui/date-range-fields.ts` | The panel's From/To pickers, presets (including Full Chat) and validation |
 | `src/entrypoints/` | WXT entry points: content script (wiring) and background worker (tab capture) |
 
 ## Permissions and privacy
@@ -169,3 +178,23 @@ Needs a logged-in WhatsApp Web, so it is not automated. Use a fresh `npm run bui
 - [ ] After creating, the panel says the Chat Record was copied and shows **Download PNG**. Click it: the file appears in your Downloads folder as `Chat history - <name> - <from> to <to>.png`, and the panel says it was downloaded under that name.
 - [ ] Download in a Chat whose name has `/`, `:` or emoji (including a joined one such as 👨‍👩‍👧 or a flag): the file saves; `/` and `:` show as `_`, emoji are kept (a joined emoji appears as its parts, e.g. 👨👩👧).
 - [ ] Close and reopen the panel: **Download PNG** is gone until a new Chat Record is made.
+
+## Manual smoke checklist (Full Chat and incomplete history, [#7](https://github.com/motiko/whatsapp-assistant/issues/7))
+
+- [ ] Click **Full Chat**: it is highlighted, From empties and a note says every message WhatsApp Web can load will be
+      recorded; Create is enabled. Picking a From date or another preset turns it off again.
+- [ ] Full Chat on a short Chat (a few screens): the Chat scrolls to the very top on its own, then down. The PNG starts
+      with the oldest day's date divider and ends with the newest message; the Context Band's `Messages:` starts at that
+      oldest day and its last line reads `Full Chat; earliest available <that day>`. The file name uses the same days.
+- [ ] In a Chat whose older history WhatsApp Web only has on the phone, scroll to the top by hand first and note the
+      prompt's exact wording ("Click here to get older messages from your phone." or other). Then make a Full Chat or a
+      Date Range reaching before it: the extension clicks the prompt itself and the record includes the older messages.
+      If it doesn't click it, save a scrubbed snapshot of that row for the adapter (see the fixtures README).
+- [ ] With the phone offline (or history not available), the same record still completes from the earliest day
+      WhatsApp Web shows, after a short wait, instead of hanging.
+- [ ] Pick a Date Range starting well before the Chat's first message (e.g. From 2015-01-01): the record starts at the
+      first available day and the Context Band's last line reads `Requested from 2015-01-01; earliest available <day>`;
+      the file name uses `<day> to <to>`.
+- [ ] A Date Range whose From day is loadable gets no such line.
+- [ ] A Date Range entirely before the earliest available day still says "No messages between X and Y".
+- [ ] A Full Chat in a Chat without messages says the Chat has no messages and copies nothing.
