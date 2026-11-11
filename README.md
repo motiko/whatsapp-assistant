@@ -11,7 +11,8 @@ Current state ([#2](https://github.com/motiko/whatsapp-assistant/issues/2) walki
 [#4](https://github.com/motiko/whatsapp-assistant/issues/4) progress, Cancel and failure handling,
 [#3](https://github.com/motiko/whatsapp-assistant/issues/3) "Read more",
 [#7](https://github.com/motiko/whatsapp-assistant/issues/7) Full Chat and incomplete history; together
-the whole of [#1](https://github.com/motiko/whatsapp-assistant/issues/1)):
+the whole of [#1](https://github.com/motiko/whatsapp-assistant/issues/1); plus
+[#9](https://github.com/motiko/whatsapp-assistant/issues/9) Partial Chat Records, Continue and Gap Records):
 a button in the open Chat's header opens a panel where you pick a **Date Range** (From/To pickers
 or the Today, Last 7 days, Last 30 days, Year to date and Last 2 years presets) or the **Full Chat**. **Create Chat Record**
 scrolls the Chat to the range itself, loading older messages as needed (including clicking WhatsApp
@@ -21,7 +22,8 @@ captures as many screens as needed and copies them, stitched, to the clipboard a
 history as far back as asked, the Chat Record starts at the earliest available day and the Context
 Band says so. A Chat Record more than 10 chat-area heights tall downloads as a multi-page PDF
 instead. While it runs the panel shows progress and **Cancel**, and WhatsApp Web is locked against
-clicks.
+clicks. If a run fails part-way, what was captured is kept as a **Partial Chat Record** and the panel
+offers **Continue** to record the rest.
 
 ## Requirements
 
@@ -81,9 +83,11 @@ navigated away, and also opens the panel. If you skip it, the panel tells you to
    WhatsApp Web is dimmed and locked against clicks and scrolling until it ends, and the panel
    can't be closed. The lock, panel and button are made invisible for each capture, so they are
    never in the Chat Record. Only one Chat Record runs at a time. If you switch to another tab or
-   minimise the window part-way, the Chat Record fails and nothing is copied (Chrome stops painting
-   a hidden tab, so you see the message when you come back). If WhatsApp Web's page stops looking
-   as expected part-way, it fails with "page wasn't recognised" and nothing is copied.
+   minimise the window part-way, the run fails (Chrome stops painting a hidden tab, so you see the
+   message when you come back); so it does if WhatsApp Web's page stops looking as expected
+   ("page wasn't recognised") or stops scrolling as expected. What was captured until then is kept
+   as a Partial Chat Record (see step 8); if not even one whole message was captured, nothing is
+   copied. **Cancel** always produces nothing.
 5. Above the messages, in a separate white strip (the Context Band), are the Chat's name, the days
    the Chat Record actually covers (the first and last day with messages in the range, which can be
    narrower than the range you picked) and when it was taken (local time and UTC offset).
@@ -97,6 +101,24 @@ navigated away, and also opens the panel. If you skip it, the panel tells you to
    single message taller than a whole page is split, at the page's height. The Context Band is at
    the top of the first page only. Page images are lossless (the same pixels as a PNG), made on
    your computer with [pdf-lib](https://github.com/Hopding/pdf-lib); nothing is uploaded.
+8. **A run that fails part-way** (not one you cancel) keeps everything up to the last message it
+   captured in full as a **Partial Chat Record**: copied as a PNG with **Download PNG**, or downloaded
+   as a PDF when long, like any Chat Record. Its file name ends ` (partial)`, e.g.
+   `Chat history - Joy - 2026-01-01 to 2026-03-14 (partial).pdf`, where the end date is the last day
+   actually captured, and its Context Band adds `Partial: stopped after <day> <time>, run failed:
+   <reason>` (the time is the one WhatsApp shows on that message; just the day if it shows none).
+   The panel then offers **Continue from <day> <time>** whenever it is opened on that Chat, also after
+   reloading WhatsApp Web. Continue records from right after that message (found again by WhatsApp's
+   message id) to the original To day, or to the newest message for a Full Chat; its Context Band says
+   which partial record it continues. If that message can't be found again, it starts at the
+   beginning of its day instead, overlapping the partial record rather than leaving a gap. A
+   Continuation that fails too saves another Partial Chat Record and offers Continue again; one that
+   finishes is forgotten.
+9. When a Continuation finishes it checks that its first message is the one right after the partial
+   record's last. If messages were missed in between, it records just those and downloads them as a
+   separate **Gap Record**, `Chat history - <Chat name> - <days> (gap).png` (or `.pdf`), whose Context
+   Band names the two records it connects. Overlap (repeated messages) is left alone. The panel says
+   when this happens, and warns if the missed messages couldn't be recorded.
 
 ## Tests
 
@@ -119,11 +141,18 @@ Tests sit at two seams (see the spec's Testing Decisions in
   builder (`src/core/file-name.test.ts`) is also tested directly. PDF Chat Records are read back page
   by page with `src/core/testing/read-pdf.ts`; those tests use a small screen (a 100px chat area) so
   records taller than ten chat areas stay within the 4095 device pixels the fake Camera can encode.
+  Partial Chat Records, Continuations and Gap Records are tested the same way: a run fails part-way
+  (fake Camera or page failures), a fresh fake page plays a reloaded WhatsApp Web, and the stitched
+  rows of the records together must cover every Chat row exactly once.
+- **Pending Continuations** (`src/extension/continuation-store.test.ts`): what is kept per Chat, and
+  that only ids, days, times, the request and the failure reason are written, through an in-memory
+  stand-in for `chrome.storage.session`.
 - **Date Range fields** (`src/ui/date-range-fields.test.ts`): pickers, presets and validation,
   driven through the DOM with a fixed "today".
 - **Panel while recording** (`src/ui/record-panel.test.ts`): progress text, Cancel, the notice, the
-  lock over WhatsApp Web, and that `hide()` makes all of it invisible for captures, driven through the
-  DOM with a scripted `createChatRecord`.
+  lock over WhatsApp Web, and that `hide()` makes all of it invisible for captures; Continue offered
+  only for the open Chat's pending Continuation, and the confirmations for partial and gap saves;
+  driven through the DOM with a scripted `createChatRecord` and an in-memory Continuation store.
 - **Hidden-tab guard** (`src/extension/visible-tab-camera.test.ts`): captures fail once the tab has
   been hidden during a Chat Record (visibility faked through `visibilitychange`).
 - **WhatsApp Web adapter** (`src/whatsapp-web/*.test.ts`): run against page snapshots in
@@ -136,7 +165,7 @@ Tests sit at two seams (see the spec's Testing Decisions in
 
 | Path | Module |
 | --- | --- |
-| `src/core/chat-recorder.ts` | **Chat Recorder**: request (a Date Range, the Full Chat, or the visible chat area) plus optional `onProgress` and cancel `signal` in, outcome out (a Chat Record, *no messages*, *empty chat*, *cancelled*, or *failed* with a reason, including *busy* while another runs). Range resolution (loading older messages, incomplete history), the scroll-and-capture loop with "Read more" expansion, cropping, stitching, adding the Context Band, and choosing PNG or PDF (with PDF page breaks). No Chrome or WhatsApp knowledge. |
+| `src/core/chat-recorder.ts` | **Chat Recorder**: request (a Date Range, the Full Chat, a Continuation of a Partial Chat Record, or the visible chat area) plus optional `onProgress` and cancel `signal` in, outcome out (a Chat Record, with a Gap Record for a Continuation that missed messages; a Partial Chat Record with its continuation point; *no messages*, *empty chat*, *cancelled*, or *failed* with a reason, including *busy* while another runs). Range resolution (loading older messages, incomplete history), the scroll-and-capture loop with "Read more" expansion, cropping, stitching, adding the Context Band, and choosing PNG or PDF (with PDF page breaks). No Chrome or WhatsApp knowledge. |
 | `src/core/context-band.ts` | **Context Band**: its text (with optional extra lines) and drawing it above an image, or on its own |
 | `src/core/pdf.ts` | A PDF of page images (lossless, one image per page at its on-screen size), made locally with pdf-lib |
 | `src/core/file-name.ts` | The file name a Chat Record is saved under, safe for every OS and Chrome's downloads |
@@ -144,7 +173,7 @@ Tests sit at two seams (see the spec's Testing Decisions in
 | `src/core/whatsapp-page.ts` | **WhatsApp Page** interface (Chat name, chat area, scroll position/height, scrolling, loaded date dividers and messages, expanding "Read more" within a span, loading older messages or saying there are none) and `PageNotRecognisedError` |
 | `src/core/camera.ts` | **Camera** interface (visible-tab bitmap + device pixel ratio) and `CaptureNotAllowedError` |
 | `src/whatsapp-web/` | **WhatsApp Web adapter**: the only code that knows WhatsApp Web's page. All selectors are in `selectors.ts`; reading divider labels ("Today", weekdays, locale dates) is in `divider-dates.ts`. |
-| `src/extension/` | Chrome-side pieces: the tab Camera (paced, hides own UI), the hidden-tab guard around it (`visible-tab-camera.ts`), clipboard and download output, messages to the background worker |
+| `src/extension/` | Chrome-side pieces: the tab Camera (paced, hides own UI), the hidden-tab guard around it (`visible-tab-camera.ts`), clipboard and download output, messages to the background worker, pending Continuations in session storage (`continuation-store.ts`) |
 | `src/ui/record-panel.ts` | Header button and panel, including progress, Cancel and the lock over WhatsApp Web while recording |
 | `src/ui/date-range-fields.ts` | The panel's From/To pickers, presets (including Full Chat) and validation |
 | `src/entrypoints/` | WXT entry points: content script (wiring) and background worker (tab capture) |
@@ -154,14 +183,21 @@ Tests sit at two seams (see the spec's Testing Decisions in
 - `host_permissions`: `https://web.whatsapp.com/*` only.
 - `activeTab`: needed for `chrome.tabs.captureVisibleTab` (see above).
 - `clipboardWrite`: lets the content script put the PNG on the clipboard.
+- `storage`: `chrome.storage.session`, for pending Continuations (below). The background worker
+  lets the content script use it (`setAccessLevel`).
 - No `downloads` permission: **Download** clicks a download link from the content script, which needs
   none. The cost is that the extension can't see where Chrome saved the file, so the confirmation
   names the file and your Downloads folder (if Chrome is set to ask where to save, it is wherever you
   chose).
 
-The extension makes no network requests and stores nothing; Chat Records exist only on your clipboard
-and in files you download. The panel keeps the last Chat Record in memory only while it offers to
-download it.
+The extension makes no network requests and stores no message content or images; Chat Records exist
+only on your clipboard and in files you download. The panel keeps the last Chat Record in memory only
+while it offers to download it. The one thing it keeps is where each Partial Chat Record stopped, so
+it can offer **Continue**: per Chat, the Chat's name, the request (From and To days, or Full Chat),
+WhatsApp's id of the last message captured with its day and time, the failure reason and the partial
+record's file name. These are ids and dates only, never message text or pixels, kept in
+`chrome.storage.session`: in memory, cleared when Chrome closes (they survive reloading WhatsApp
+Web). A Continuation that finishes removes its Chat's entry.
 
 ## Manual smoke checklist (walking skeleton)
 
@@ -240,13 +276,14 @@ Needs a logged-in WhatsApp Web, so it is not automated. Use a fresh `npm run bui
 - [ ] Click **Cancel** part-way (also on a range long enough for a PDF: no PDF is downloaded): within about a second the Chat stops scrolling, the panel says
       "Cancelled. No Chat Record was made.", the clipboard still holds what it held before, WhatsApp Web is
       no longer dimmed and can be scrolled and clicked, and **Create Chat Record** works again.
-- [ ] Start a long run and switch to another tab for a few seconds, then back: the panel says the screen
-      couldn't be captured because the WhatsApp tab was hidden, and nothing was copied. Repeat by minimising
-      the window.
+- [ ] Start a long run and switch to another tab for a few seconds, then back: the panel says the run failed
+      part-way because the WhatsApp tab was hidden, and keeps what was captured as a Partial Chat Record (see
+      the [#9](https://github.com/motiko/whatsapp-assistant/issues/9) checklist). Repeat by minimising the window.
 - [ ] While one runs, click the toolbar icon (reopens the panel): it keeps showing progress and doesn't let you
       start a second Chat Record.
-- [ ] Reload WhatsApp Web part-way: the run stops, nothing is copied, and after the reload the button and panel
-      work again (click the toolbar icon again first, see "Allowing capture").
+- [ ] Reload WhatsApp Web part-way: the run stops (the page and the run in it are gone, so no Partial Chat
+      Record can be saved), and after the reload the button and panel work again (click the toolbar icon again
+      first, see "Allowing capture").
 
 ## Manual smoke checklist ("Read more", [#3](https://github.com/motiko/whatsapp-assistant/issues/3))
 
@@ -289,3 +326,36 @@ tested against are synthetic, so these checks are the first proof it works on th
 - [ ] A Full Chat of a long Chat shows progress, downloads as a PDF when over ten screens, and expands "Read more"
       on the way down; clicking **Cancel** while it is still loading older history (before any screen is captured)
       stops it within a few seconds with "Cancelled. No Chat Record was made."
+
+## Manual smoke checklist (Partial Chat Records, Continue and Gap Records, [#9](https://github.com/motiko/whatsapp-assistant/issues/9))
+
+The message time comes from WhatsApp Web's `data-pre-plain-text` on text messages (`messageTimestamp` in
+`src/whatsapp-web/selectors.ts`), which is unverified against the real page; without it the panel and Context
+Band show only the day.
+
+- [ ] Start a Date Range of 4+ screens and switch to another tab after two or three screens, then back: the panel
+      says the run failed part-way, that what was captured up to <day> <time> was copied as a partial Chat Record,
+      and to click **Continue from <day> <time>**. **Download PNG** saves `Chat history - <name> - <from> to <day
+      reached> (partial).png`.
+- [ ] Paste it: it ends right after a whole message (no message cut off at the bottom); the Context Band's last
+      line reads `Partial: stopped after <day> <time>, run failed: <reason>`, and the time matches that message's
+      time in WhatsApp.
+- [ ] The same with a range long enough for a PDF (fail it after 11+ screens): a ` (partial).pdf` downloads at once.
+- [ ] **Cancel** part-way instead: nothing is copied and no Continue appears.
+- [ ] Close and reopen the panel, then open another Chat and the panel: Continue shows only in the first Chat.
+- [ ] Reload WhatsApp Web (click the toolbar icon again), open the same Chat and the panel: Continue is still there.
+      Click it, then **Create Chat Record**: the Chat scrolls to the partial record's last message (loading older
+      messages if needed) and records from right below it to the original To day. Paste both images one above the
+      other: together they show every message exactly once, no gap, no repeat. Its Context Band says which partial
+      record it continues. Continue is gone afterwards.
+- [ ] Continue a partial Full Chat: the Continuation ends with the newest message.
+- [ ] Chain: fail a Continuation part-way too: a second ` (partial)` record and a new Continue from its last message;
+      continuing again completes the range, and the three images together have every message once.
+- [ ] Picking a preset or a date after clicking Continue goes back to a normal Date Range.
+- [ ] Quit and restart Chrome: no Continue is offered (session storage is cleared).
+- [ ] DevTools > Application > Storage > Session storage for the extension (or `chrome.storage.session.get()` in the
+      background worker's console): the entry holds only the Chat's name, the request days, the message id, day and
+      time, the reason and the partial file name; no message text or image.
+- [ ] A Gap Record can't be provoked on purpose (a Continuation that finds the message starts exactly below it).
+      If a Continuation ever downloads a ` (gap)` file, check that it holds exactly the messages missing between the
+      two records and that its Context Band names both files.
