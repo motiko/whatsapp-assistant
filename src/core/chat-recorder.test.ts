@@ -2,7 +2,7 @@ import { describe, expect, test } from 'vitest';
 import { CaptureNotAllowedError, type Camera } from './camera';
 import { createChatRecorder, type ChatRecordOutcome } from './chat-recorder';
 import { drawContextBand } from './context-band';
-import { PageNotRecognisedError, type WhatsAppPage } from './whatsapp-page';
+import { PageNotRecognisedError, type ChatItem, type WhatsAppPage } from './whatsapp-page';
 import { createFakeCamera, readScreenPositions } from './testing/fake-camera';
 import { readPdfPages } from './testing/read-pdf';
 import { createFakeWhatsAppPage, type FakeChatDay } from './testing/fake-whatsapp-page';
@@ -765,6 +765,35 @@ describe('a Chat Record that fails part-way', () => {
       kind: 'failed',
       reason: 'page-not-recognised',
       detail: "WhatsApp Web's page was not recognised: no message list",
+    });
+  });
+
+  test('fails, producing nothing, when WhatsApp Web no longer shows any row already captured', async () => {
+    const fake = createFakeWhatsAppPage({ chatName: 'Alice', chatArea, chat: sixDays });
+    // After the first screen, WhatsApp Web reports only rows it had not
+    // reported before, so nothing captured can tell where the record continues.
+    const seen = new Set<string>();
+    let screens = 0;
+    const key = (item: ChatItem) => (item.kind === 'date-divider' ? item.day : item.id);
+    const page: WhatsAppPage = {
+      ...fake,
+      loadedItems() {
+        const items = fake.loadedItems();
+        if (screens === 0) items.forEach((item) => seen.add(key(item)));
+        return screens === 0 ? items : items.filter((item) => !seen.has(key(item)));
+      },
+    };
+    const recorder = createChatRecorder({ page, camera: createFakeCamera({ viewport, page: fake }) });
+
+    const outcome = await recorder.record(
+      { kind: 'date-range', from: '2026-11-02', to: '2026-11-04' },
+      { onProgress: (p) => (screens = p.screensCaptured) },
+    );
+
+    expect(outcome).toEqual({
+      kind: 'failed',
+      reason: 'capture-failed',
+      detail: 'WhatsApp Web no longer shows any part of the Chat Record captured so far',
     });
   });
 
