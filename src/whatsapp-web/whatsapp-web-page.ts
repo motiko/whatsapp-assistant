@@ -52,15 +52,9 @@ export function createWhatsAppWebPage(doc: Document, options: WhatsAppWebPageOpt
       await settle(doc.defaultView!, scroller, settleMs);
     },
     loadedItems() {
-      const scroller = messageScroller(doc);
-      const list = find(doc, selectors.messageList, 'the message list');
-      // Content position 0 is the top of the scroll container's content.
-      const origin = scroller.getBoundingClientRect().top + scroller.clientTop - scroller.scrollTop;
       const now = today();
       const items: ChatItem[] = [];
-      for (const row of list.querySelectorAll(selectors.messageListRow)) {
-        const box = row.getBoundingClientRect();
-        const span = { top: box.top - origin, bottom: box.bottom - origin };
+      for (const { row, span } of listRows(doc)) {
         if (row.querySelector(selectors.message)) {
           items.push({ kind: 'message', ...span });
           continue;
@@ -70,7 +64,44 @@ export function createWhatsAppWebPage(doc: Document, options: WhatsAppWebPageOpt
       }
       return items;
     },
+    async expandReadMore(span) {
+      const clicked = new WeakSet<Element>();
+      for (let round = 0; round < maxReadMoreRounds; round++) {
+        const buttons = listRows(doc).flatMap(({ row, span: rowSpan }) =>
+          rowSpan.bottom > span.top && rowSpan.top < span.bottom
+            ? Array.from(row.querySelectorAll<HTMLElement>(selectors.readMore))
+            : [],
+        );
+        if (buttons.length === 0) return;
+        // A button already clicked is still waiting for WhatsApp Web to expand its message.
+        for (const button of buttons) {
+          if (clicked.has(button)) continue;
+          clicked.add(button);
+          button.click();
+        }
+        await settle(doc.defaultView!, messageScroller(doc), settleMs);
+      }
+      throw new PageNotRecognisedError('"Read more" did not show the rest of a message');
+    },
   };
+}
+
+/**
+ * How many times to look for "Read more" again after expanding: WhatsApp Web
+ * may show a very long message in several steps, each with its own "Read more".
+ */
+const maxReadMoreRounds = 20;
+
+/** Every row of the message list, with its vertical span in content positions. */
+function listRows(doc: Document): { row: Element; span: { top: number; bottom: number } }[] {
+  const scroller = messageScroller(doc);
+  const list = find(doc, selectors.messageList, 'the message list');
+  // Content position 0 is the top of the scroll container's content.
+  const origin = scroller.getBoundingClientRect().top + scroller.clientTop - scroller.scrollTop;
+  return Array.from(list.querySelectorAll(selectors.messageListRow), (row) => {
+    const box = row.getBoundingClientRect();
+    return { row, span: { top: box.top - origin, bottom: box.bottom - origin } };
+  });
 }
 
 /** Resolves once the list has been painted and its height has stopped changing. */

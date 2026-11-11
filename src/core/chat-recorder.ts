@@ -262,7 +262,7 @@ async function recordDateRange(
   // Walk down one chat-area height at a time from the first day's divider.
   // Content positions can shift between stops (WhatsApp Web loads older
   // messages above), so everything is kept relative to the first divider
-  // ("record rows") and re-anchored on any divider seen before.
+  // ("record rows") and re-anchored on any divider captured before.
   const dividerRows = new Map<LocalDay, number>([[first.day, 0]]);
   /** Record rows where a PDF page may start: the tops of messages and date dividers. */
   const pageBreaks = new Set<number>();
@@ -277,8 +277,13 @@ async function recordDateRange(
   for (let stop = 0; ; stop++) {
     run.checkpoint();
     if (stop >= maxScrollStops) throw new Error('WhatsApp Web did not stop scrolling');
+    await expandReadMoreOnScreen(page, area.height);
     const items = page.loadedItems();
-    const anchor = items.find((item) => item.kind === 'date-divider' && dividerRows.has(item.day));
+    // Only a divider already captured is a fixed point: one seen further down
+    // may have moved since, when a long message above it was expanded.
+    const anchor = items.find(
+      (item) => item.kind === 'date-divider' && (dividerRows.get(item.day) ?? Infinity) <= covered,
+    );
     if (anchor?.kind === 'date-divider') origin = anchor.top - dividerRows.get(anchor.day)!;
 
     let day: LocalDay | undefined;
@@ -324,6 +329,19 @@ async function recordDateRange(
   const span = { from: first.day, to: lastInRange.day };
   const stitched = { slices, area, devicePixelRatio, rows: lastInRange.row, pageBreaks };
   return finishRecord({ chatName, span, takenAt, stitched, checkpoint: run.checkpoint });
+}
+
+/**
+ * Shows every long message on screen in full, so a scroll stop is read and
+ * captured with "Read more" expanded. WhatsApp Web only keeps the messages
+ * near the screen loaded, so this happens stop by stop rather than for the
+ * whole range up front. Rows already captured were expanded when they were
+ * on screen, so only rows below them move; positions read before this call
+ * are stale.
+ */
+async function expandReadMoreOnScreen(page: WhatsAppPage, height: number): Promise<void> {
+  const top = page.scrollTop();
+  await page.expandReadMore({ top, bottom: top + height });
 }
 
 /** The day of the latest known divider at or above `row`. */

@@ -38,6 +38,14 @@ export interface WhatsAppPage {
   scrollTo(top: number): Promise<void>;
   /** The date dividers and messages currently loaded, in page order. */
   loadedItems(): ChatItem[];
+  /**
+   * Shows in full every loaded message that WhatsApp Web cuts short behind
+   * "Read more" and whose row overlaps content positions `span.top` to
+   * `span.bottom`, and resolves once WhatsApp Web has settled. Expanded
+   * messages grow downwards, moving every row below them: re-read
+   * `loadedItems()` (and `scrollHeight()`) afterwards.
+   */
+  expandReadMore(span: { top: number; bottom: number }): Promise<void>;
 }
 
 /** One row of the message list, with its vertical span in content pixels. */
