@@ -5,8 +5,9 @@ import type { LocalDay } from './day-span';
  *
  * The Chat Recorder knows nothing about WhatsApp Web's page structure; it
  * works only through this interface. The real adapter lives in
- * `src/whatsapp-web/`. Later tickets extend this interface (loading older
- * messages, expanding "Read more") rather than replacing it.
+ * `src/whatsapp-web/`. Besides reading and scrolling the message list, it
+ * can expand messages cut short behind "Read more" (`expandReadMore`) and
+ * load older history, including from the phone (`loadOlder`).
  *
  * Positions in the message list are in CSS pixels from the top of the scroll
  * container's content, so they do not change when the list scrolls.
@@ -46,7 +47,20 @@ export interface WhatsAppPage {
    * `loadedItems()` (and `scrollHeight()`) afterwards.
    */
   expandReadMore(span: { top: number; bottom: number }): Promise<void>;
+  /**
+   * Loads messages older than the oldest one loaded: scrolls to the top of
+   * the message list and, if WhatsApp Web asks for it, clicks its prompt to
+   * get older messages from the phone. Resolves once WhatsApp Web has
+   * settled, with `loaded` if older messages were added above (content
+   * positions then shift down; re-read `loadedItems` and `scrollTop`), or
+   * `no-older-messages` if none are available: the oldest loaded message is
+   * the earliest WhatsApp Web can show.
+   */
+  loadOlder(): Promise<OlderMessages>;
 }
+
+/** What `loadOlder` found. */
+export type OlderMessages = 'loaded' | 'no-older-messages';
 
 /** One row of the message list, with its vertical span in content pixels. */
 export type ChatItem =

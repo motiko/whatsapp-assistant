@@ -21,4 +21,17 @@ export const selectors = {
   message: '[data-id]',
   /** The "Read more" button inside a message WhatsApp Web shows cut short. */
   readMore: '.read-more-button',
+  /**
+   * Clickable elements in a message-list row that is not a message; one whose
+   * text matches `olderMessagesPromptText` is the prompt to get older
+   * messages from the phone. (Unverified against the real page.)
+   */
+  rowButton: '[role="button"], button',
 } as const;
+
+/**
+ * The text of WhatsApp Web's prompt at the top of the message list, "Click
+ * here to get older messages from your phone." Matched by text because the
+ * row has no stable attribute we know of; English only for now.
+ */
+export const olderMessagesPromptText = /older messages/i;

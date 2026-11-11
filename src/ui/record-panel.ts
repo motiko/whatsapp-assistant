@@ -1,6 +1,9 @@
-import type { FailureReason, RecordProgress } from '../core/chat-recorder';
+import type { ChatRecordRequest, FailureReason, RecordProgress } from '../core/chat-recorder';
 import type { LocalDay } from '../core/day-span';
-import { createDateRangeFields, dateRangeFieldsStyles, type DateRange } from './date-range-fields';
+import { createDateRangeFields, dateRangeFieldsStyles } from './date-range-fields';
+
+/** What the panel asks to record: a Date Range or the Full Chat. */
+export type PanelRequest = Exclude<ChatRecordRequest, { kind: 'visible' }>;
 
 /** A Chat Record ready to save: its PNG or PDF and the file name (`.png` or `.pdf`) to save it under. */
 export interface RecordFile {
@@ -20,6 +23,8 @@ export type CreateResult =
   | { kind: 'made-pdf'; file: RecordFile }
   /** The chosen Date Range has no messages; nothing was made. */
   | { kind: 'no-messages'; from: LocalDay; to: LocalDay }
+  /** A Full Chat was asked for, but the Chat has no messages; nothing was made. */
+  | { kind: 'empty-chat' }
   /** The user cancelled it; nothing was made. */
   | { kind: 'cancelled' }
   | { kind: 'failed'; reason: FailureReason; detail: string };
@@ -46,8 +51,8 @@ export interface RecordPanel {
 
 /**
  * The header button and the small panel it opens. The panel shows which Chat
- * the Chat Record will be of, the Date Range fields, a Create Chat Record
- * button, and the result. While a Chat Record is being made it shows progress
+ * the Chat Record will be of, the Date Range fields (with the Full Chat
+ * preset), a Create Chat Record button, and the result. While a Chat Record is being made it shows progress
  * and Cancel, can't be closed, and locks WhatsApp Web behind it against clicks
  * and scrolling. Only one Chat Record can be started at a time.
  */
@@ -57,7 +62,7 @@ export function createRecordPanel(
     /** The open Chat's name, or undefined if it cannot be read. */
     chatName: () => string | undefined;
     /** Must start any clipboard write synchronously (see `copyPngToClipboard`). */
-    createChatRecord: (range: DateRange, run: RunControls) => Promise<CreateResult>;
+    createChatRecord: (request: PanelRequest, run: RunControls) => Promise<CreateResult>;
     /** Saves the file to the Downloads folder; throws if it can't. */
     download: (file: RecordFile) => void;
   },
@@ -161,7 +166,8 @@ export function createRecordPanel(
 
   createButton.addEventListener('click', () => {
     const chosen = dateRange.value();
-    if (!('range' in chosen) || busy()) return;
+    if ('error' in chosen || busy()) return;
+    const request: PanelRequest = 'fullChat' in chosen ? { kind: 'full-chat' } : { kind: 'date-range', ...chosen.range };
     const controller = new AbortController();
     running = controller;
     showRunning(true);
@@ -172,7 +178,7 @@ export function createRecordPanel(
       if (running === controller && !controller.signal.aborted) show(progressText(progress), 'working');
     };
     options
-      .createChatRecord(chosen.range, { onProgress, signal: controller.signal })
+      .createChatRecord(request, { onProgress, signal: controller.signal })
       .then((result) => {
         if (result.kind === 'failed') {
           show(failureMessage(result.reason, result.detail), 'error');
@@ -184,6 +190,10 @@ export function createRecordPanel(
         }
         if (result.kind === 'no-messages') {
           show(noMessagesText(result.from, result.to), 'error');
+          return;
+        }
+        if (result.kind === 'empty-chat') {
+          show('This Chat has no messages WhatsApp Web can load. Nothing was copied.', 'error');
           return;
         }
         if (result.kind === 'made-pdf') {

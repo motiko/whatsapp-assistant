@@ -9,15 +9,19 @@ Current state ([#2](https://github.com/motiko/whatsapp-assistant/issues/2) walki
 [#6](https://github.com/motiko/whatsapp-assistant/issues/6) Context Band, file name and Download,
 [#8](https://github.com/motiko/whatsapp-assistant/issues/8) large Chat Records as a PDF,
 [#4](https://github.com/motiko/whatsapp-assistant/issues/4) progress, Cancel and failure handling,
-[#3](https://github.com/motiko/whatsapp-assistant/issues/3) "Read more"):
+[#3](https://github.com/motiko/whatsapp-assistant/issues/3) "Read more",
+[#7](https://github.com/motiko/whatsapp-assistant/issues/7) Full Chat and incomplete history; together
+the whole of [#1](https://github.com/motiko/whatsapp-assistant/issues/1)):
 a button in the open Chat's header opens a panel where you pick a **Date Range** (From/To pickers
-or the Today, Last 7 days and Last 30 days presets). **Create Chat Record** scrolls the Chat to the
-range itself, expands every "Read more" so long messages show in full, captures as many screens as
-needed and copies them, stitched, to the clipboard as one PNG, with a **Context Band** above it; a
-**Download** button saves the same PNG. A Chat Record more than 10 chat-area heights tall downloads
-as a multi-page PDF instead. While it runs the panel shows progress and **Cancel**, and WhatsApp Web
-is locked against clicks. Full Chat comes in a later ticket of
-[#1](https://github.com/motiko/whatsapp-assistant/issues/1).
+or the Today, Last 7 days and Last 30 days presets) or the **Full Chat**. **Create Chat Record**
+scrolls the Chat to the range itself, loading older messages as needed (including clicking WhatsApp
+Web's prompt to get them from the phone), expands every "Read more" so long messages show in full,
+captures as many screens as needed and copies them, stitched, to the clipboard as one PNG, with a
+**Context Band** above it; a **Download** button saves the same PNG. When WhatsApp Web can't load
+history as far back as asked, the Chat Record starts at the earliest available day and the Context
+Band says so. A Chat Record more than 10 chat-area heights tall downloads as a multi-page PDF
+instead. While it runs the panel shows progress and **Cancel**, and WhatsApp Web is locked against
+clicks.
 
 ## Requirements
 
@@ -58,12 +62,19 @@ navigated away, and also opens the panel. If you skip it, the panel tells you to
 3. Pick **From** and **To** (To starts at today), or click **Today**, **Last 7 days** or
    **Last 30 days**. Days are whole days in your computer's timezone, both ends included, as
    WhatsApp Web's date dividers show them. From can't be after To, and neither in the future.
+   Or click **Full Chat** for every message WhatsApp Web can load (picking a date or another preset
+   goes back to a Date Range).
 4. Click **Create Chat Record** and leave the tab alone (visible, no scrolling) until it is done.
    The extension scrolls to the range, captures screen by screen (at most about two per second,
    Chrome's limit) and copies one PNG to the clipboard: from the top of the first day's date
    divider to the bottom of the last message of the last day, cropped to the chat area (no Chat
    list, header, message box, scrollbar or extension UI). A range with no messages says
-   "No messages between X and Y" and copies nothing.
+   "No messages between X and Y" and copies nothing. To reach the range it loads older messages,
+   clicking WhatsApp Web's "get older messages from your phone" prompt when it appears; a Full Chat
+   loads all of them first, so it can take a while (each load waits up to 5 seconds).
+   If WhatsApp Web runs out of older messages before the From day, the Chat Record starts at the
+   earliest day available and the Context Band says so: `Requested from <From>; earliest available
+   <day>`. A Full Chat's Context Band always ends `Full Chat; earliest available <day>`.
 
    While it runs, the panel shows how many screens it has captured and the day it has reached,
    reminds you to keep the tab visible, and offers **Cancel** (which stops it and copies nothing).
@@ -125,17 +136,17 @@ Tests sit at two seams (see the spec's Testing Decisions in
 
 | Path | Module |
 | --- | --- |
-| `src/core/chat-recorder.ts` | **Chat Recorder**: request (a Date Range, or the visible chat area) plus optional `onProgress` and cancel `signal` in, outcome out (a Chat Record, *no messages*, *cancelled*, or *failed* with a reason, including *busy* while another runs). Range resolution, the scroll-and-capture loop, cropping, stitching, adding the Context Band, and choosing PNG or PDF (with PDF page breaks). No Chrome or WhatsApp knowledge. |
+| `src/core/chat-recorder.ts` | **Chat Recorder**: request (a Date Range, the Full Chat, or the visible chat area) plus optional `onProgress` and cancel `signal` in, outcome out (a Chat Record, *no messages*, *empty chat*, *cancelled*, or *failed* with a reason, including *busy* while another runs). Range resolution (loading older messages, incomplete history), the scroll-and-capture loop with "Read more" expansion, cropping, stitching, adding the Context Band, and choosing PNG or PDF (with PDF page breaks). No Chrome or WhatsApp knowledge. |
 | `src/core/context-band.ts` | **Context Band**: its text (with optional extra lines) and drawing it above an image, or on its own |
 | `src/core/pdf.ts` | A PDF of page images (lossless, one image per page at its on-screen size), made locally with pdf-lib |
 | `src/core/file-name.ts` | The file name a Chat Record is saved under, safe for every OS and Chrome's downloads |
 | `src/core/day-span.ts` | Local days (ISO `YYYY-MM-DD`) and the span of days a Chat Record covers |
-| `src/core/whatsapp-page.ts` | **WhatsApp Page** interface (Chat name, chat area, scroll position/height, scrolling, loaded date dividers and messages, expanding "Read more" within a span) and `PageNotRecognisedError` |
+| `src/core/whatsapp-page.ts` | **WhatsApp Page** interface (Chat name, chat area, scroll position/height, scrolling, loaded date dividers and messages, expanding "Read more" within a span, loading older messages or saying there are none) and `PageNotRecognisedError` |
 | `src/core/camera.ts` | **Camera** interface (visible-tab bitmap + device pixel ratio) and `CaptureNotAllowedError` |
 | `src/whatsapp-web/` | **WhatsApp Web adapter**: the only code that knows WhatsApp Web's page. All selectors are in `selectors.ts`; reading divider labels ("Today", weekdays, locale dates) is in `divider-dates.ts`. |
 | `src/extension/` | Chrome-side pieces: the tab Camera (paced, hides own UI), the hidden-tab guard around it (`visible-tab-camera.ts`), clipboard and download output, messages to the background worker |
 | `src/ui/record-panel.ts` | Header button and panel, including progress, Cancel and the lock over WhatsApp Web while recording |
-| `src/ui/date-range-fields.ts` | The panel's From/To pickers, presets and validation |
+| `src/ui/date-range-fields.ts` | The panel's From/To pickers, presets (including Full Chat) and validation |
 | `src/entrypoints/` | WXT entry points: content script (wiring) and background worker (tab capture) |
 
 ## Permissions and privacy
@@ -255,3 +266,26 @@ tested against are synthetic, so these checks are the first proof it works on th
 - [ ] A long message with a link, a quoted reply, and one in a group Chat: all expanded.
 - [ ] If the panel says the page wasn't recognised right after expanding, note what "Read more" looks like in
       DevTools (element, class, role) so the selector and the snapshot can be fixed.
+
+## Manual smoke checklist (Full Chat and incomplete history, [#7](https://github.com/motiko/whatsapp-assistant/issues/7))
+
+- [ ] Click **Full Chat**: it is highlighted, From empties and a note says every message WhatsApp Web can load will be
+      recorded; Create is enabled. Picking a From date or another preset turns it off again.
+- [ ] Full Chat on a short Chat (a few screens): the Chat scrolls to the very top on its own, then down. The PNG starts
+      with the oldest day's date divider and ends with the newest message; the Context Band's `Messages:` starts at that
+      oldest day and its last line reads `Full Chat; earliest available <that day>`. The file name uses the same days.
+- [ ] In a Chat whose older history WhatsApp Web only has on the phone, scroll to the top by hand first and note the
+      prompt's exact wording ("Click here to get older messages from your phone." or other). Then make a Full Chat or a
+      Date Range reaching before it: the extension clicks the prompt itself and the record includes the older messages.
+      If it doesn't click it, save a scrubbed snapshot of that row for the adapter (see the fixtures README).
+- [ ] With the phone offline (or history not available), the same record still completes from the earliest day
+      WhatsApp Web shows, after a short wait, instead of hanging.
+- [ ] Pick a Date Range starting well before the Chat's first message (e.g. From 2015-01-01): the record starts at the
+      first available day and the Context Band's last line reads `Requested from 2015-01-01; earliest available <day>`;
+      the file name uses `<day> to <to>`.
+- [ ] A Date Range whose From day is loadable gets no such line.
+- [ ] A Date Range entirely before the earliest available day still says "No messages between X and Y".
+- [ ] A Full Chat in a Chat without messages says the Chat has no messages and copies nothing.
+- [ ] A Full Chat of a long Chat shows progress, downloads as a PDF when over ten screens, and expands "Read more"
+      on the way down; clicking **Cancel** while it is still loading older history (before any screen is captured)
+      stops it within a few seconds with "Cancelled. No Chat Record was made."

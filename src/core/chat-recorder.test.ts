@@ -773,6 +773,34 @@ describe('cancelling a Chat Record', () => {
     expect(camera.captures).toBe(0);
   });
 
+  test('while a Full Chat is loading older history captures nothing and loads no more', async () => {
+    const fake = createFakeWhatsAppPage({
+      chatName: 'Alice',
+      chatArea,
+      chat: sixDays.slice(4),
+      olderMessagesOnPhone: sixDays.slice(2, 4),
+    });
+    const cancel = new AbortController();
+    let olderLoads = 0;
+    const page: WhatsAppPage = {
+      ...fake,
+      async loadOlder() {
+        olderLoads++;
+        // The user clicks Cancel while WhatsApp Web fetches older messages from the phone.
+        cancel.abort();
+        return fake.loadOlder();
+      },
+    };
+    const camera = countingCamera(createFakeCamera({ viewport, page }));
+    const recorder = createChatRecorder({ page, camera });
+
+    const outcome = await recorder.record({ kind: 'full-chat' }, { signal: cancel.signal });
+
+    expect(outcome).toEqual({ kind: 'cancelled' });
+    expect(olderLoads).toBe(1);
+    expect(camera.captures).toBe(0);
+  });
+
   test('after the last screen of a Chat Record long enough for a PDF produces no PDF', async () => {
     const recorder = smallScreenRecorderFor(twoHundredPixelDays(6));
     const cancel = new AbortController();
@@ -809,3 +837,134 @@ function mismatchedChatPixels(image: Awaited<ReturnType<typeof readScreenPositio
   }
   return mismatches;
 }
+
+describe('a Date Range starting before the earliest message WhatsApp Web can load', () => {
+  test('is recorded from the earliest available day, and the Context Band says so', async () => {
+    // WhatsApp Web can load nothing before 3 Nov.
+    const page = createFakeWhatsAppPage({ chatName: 'Alice', chatArea, chat: sixDays.slice(2) });
+    const recorder = createChatRecorder({
+      page,
+      camera: createFakeCamera({ viewport, page }),
+      clock: () => new Date('2026-11-11T13:32:05Z'),
+    });
+
+    const outcome = await recorder.record({ kind: 'date-range', from: '2026-11-01', to: '2026-11-04' });
+
+    expect(outcome).toMatchObject({
+      kind: 'record',
+      record: {
+        span: { from: '2026-11-03', to: '2026-11-04' },
+        historyIncomplete: true,
+        contextBand: [
+          'Chat: Alice',
+          'Messages: 2026-11-03 to 2026-11-04',
+          'Taken: 2026-11-11 14:32 (UTC+01:00)',
+          'Requested from 2026-11-01; earliest available 2026-11-03',
+        ],
+        fileName: 'Chat history - Alice - 2026-11-03 to 2026-11-04.png',
+      },
+    });
+    // 3 Nov's divider (now at 0) to the end of 4 Nov.
+    const image = await recordedImage(outcome);
+    expect(image.height).toBe(1080);
+    expect(image.at(0, 0).y).toBe(0);
+    expect(image.at(0, 1079).y).toBe(1079);
+  });
+
+  test('is recorded in full, with no note, when older messages must first be fetched from the phone', async () => {
+    const page = createFakeWhatsAppPage({
+      chatName: 'Alice',
+      chatArea,
+      chat: sixDays.slice(4),
+      olderMessages: sixDays.slice(2, 4),
+      olderMessagesOnPhone: sixDays.slice(0, 2),
+    });
+    const recorder = createChatRecorder({ page, camera: createFakeCamera({ viewport, page }) });
+
+    const outcome = await recorder.record({ kind: 'date-range', from: '2026-11-02', to: '2026-11-04' });
+
+    expect(outcome).toMatchObject({
+      kind: 'record',
+      record: { span: { from: '2026-11-02', to: '2026-11-04' }, historyIncomplete: false },
+    });
+    if (outcome.kind !== 'record') return;
+    expect(outcome.record.contextBand).toHaveLength(3);
+    const image = await recordedImage(outcome);
+    expect(image.height).toBe(1620);
+    expect(image.at(0, 0).y).toBe(540);
+  });
+
+  test('that has no messages on any available day produces nothing', async () => {
+    const page = createFakeWhatsAppPage({ chatName: 'Alice', chatArea, chat: sixDays.slice(4) });
+    const recorder = createChatRecorder({ page, camera: createFakeCamera({ viewport, page }) });
+
+    const outcome = await recorder.record({ kind: 'date-range', from: '2026-11-01', to: '2026-11-03' });
+
+    expect(outcome).toEqual({ kind: 'no-messages', from: '2026-11-01', to: '2026-11-03' });
+  });
+});
+
+describe('Chat Record of the Full Chat', () => {
+  test('loads every older message WhatsApp Web has, and records from the earliest day to the newest message', async () => {
+    const page = createFakeWhatsAppPage({
+      chatName: 'Alice',
+      chatArea,
+      chat: sixDays.slice(3),
+      olderMessages: sixDays.slice(1, 3),
+      olderMessagesOnPhone: sixDays.slice(0, 1),
+    });
+    const recorder = createChatRecorder({
+      page,
+      camera: createFakeCamera({ viewport, page }),
+      clock: () => new Date('2026-11-11T13:32:05Z'),
+    });
+
+    const outcome = await recorder.record({ kind: 'full-chat' });
+
+    expect(outcome).toMatchObject({
+      kind: 'record',
+      record: {
+        span: { from: '2026-11-01', to: '2026-11-06' },
+        contextBand: [
+          'Chat: Alice',
+          'Messages: 2026-11-01 to 2026-11-06',
+          'Taken: 2026-11-11 14:32 (UTC+01:00)',
+          'Full Chat; earliest available 2026-11-01',
+        ],
+        fileName: 'Chat history - Alice - 2026-11-01 to 2026-11-06.png',
+      },
+    });
+    const image = await recordedImage(outcome);
+    expect(image.height).toBe(3240);
+    for (let row = 0; row < image.height; row++) expect(image.at(0, row).y).toBe(row);
+  });
+
+  test('states the earliest day WhatsApp Web could load when that is all it has', async () => {
+    // Older history exists on the phone in reality, but WhatsApp Web can load nothing before 4 Nov.
+    const page = createFakeWhatsAppPage({ chatName: 'Alice', chatArea, chat: sixDays.slice(3) });
+    const recorder = createChatRecorder({ page, camera: createFakeCamera({ viewport, page }) });
+
+    const outcome = await recorder.record({ kind: 'full-chat' });
+
+    expect(outcome).toMatchObject({
+      kind: 'record',
+      record: {
+        span: { from: '2026-11-04', to: '2026-11-06' },
+        fileName: 'Chat history - Alice - 2026-11-04 to 2026-11-06.png',
+      },
+    });
+    if (outcome.kind !== 'record') return;
+    expect(outcome.record.contextBand.at(-1)).toBe('Full Chat; earliest available 2026-11-04');
+    const image = await recordedImage(outcome);
+    expect(image.height).toBe(1620);
+    expect(image.at(0, 0).y).toBe(0);
+  });
+
+  test('produces nothing for a Chat without messages', async () => {
+    const recorder = recorderFor([]);
+
+    const outcome = await recorder.record({ kind: 'full-chat' });
+
+    expect(outcome).toEqual({ kind: 'empty-chat' });
+  });
+});

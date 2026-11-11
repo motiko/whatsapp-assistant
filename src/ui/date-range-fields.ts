@@ -6,17 +6,19 @@ export interface DateRange {
 }
 
 export interface DateRangeFields {
-  /** The chosen Date Range, or why it can't be used. */
-  value(): { range: DateRange } | { error: string };
+  /** The chosen Date Range, the Full Chat, or why the choice can't be used. */
+  value(): { range: DateRange } | { fullChat: true } | { error: string };
   /** Re-reads today (the pickers' upper limit, and To if it is empty). */
   refresh(): void;
 }
 
 /**
- * The panel's From and To date pickers with the Today, Last 7 days and
- * Last 30 days presets. Days are whole local days, both ends included, so
- * "Last 7 days" is today and the six days before it. To starts at today;
- * From must not be after To, and neither may be in the future.
+ * The panel's From and To date pickers with the Today, Last 7 days,
+ * Last 30 days and Full Chat presets. Days are whole local days, both ends
+ * included, so "Last 7 days" is today and the six days before it. To starts
+ * at today; From must not be after To, and neither may be in the future.
+ * Full Chat clears From and stands for every message; choosing a date or
+ * another preset goes back to a Date Range.
  * Renders into `container`; style it with `dateRangeFieldsStyles`.
  */
 export function createDateRangeFields(
@@ -33,13 +35,24 @@ export function createDateRangeFields(
       <button type="button" data-days="1">Today</button>
       <button type="button" data-days="7">Last 7 days</button>
       <button type="button" data-days="30">Last 30 days</button>
+      <button type="button" class="full-chat" aria-pressed="false">Full Chat</button>
     </div>
+    <p class="full-chat-note" hidden>Every message WhatsApp Web can load, from the oldest to the newest.</p>
     <p class="range-error" role="alert"></p>`;
   const fromInput = container.querySelector<HTMLInputElement>('input[name="from"]')!;
   const toInput = container.querySelector<HTMLInputElement>('input[name="to"]')!;
   const errorText = container.querySelector<HTMLElement>('.range-error')!;
+  const fullChatButton = container.querySelector<HTMLButtonElement>('.full-chat')!;
+  const fullChatNote = container.querySelector<HTMLElement>('.full-chat-note')!;
+  let fullChat = false;
+  const setFullChat = (on: boolean) => {
+    fullChat = on;
+    fullChatButton.setAttribute('aria-pressed', String(on));
+    fullChatNote.hidden = !on;
+  };
 
-  const value = (): { range: DateRange } | { error: string } => {
+  const value = (): ReturnType<DateRangeFields['value']> => {
+    if (fullChat) return { fullChat: true };
     const from = fromInput.value;
     const to = toInput.value;
     if (!from) return { error: 'Choose a From date, or a preset.' };
@@ -60,10 +73,21 @@ export function createDateRangeFields(
     if (!toInput.value) toInput.value = today();
   };
 
-  fromInput.addEventListener('input', changed);
-  toInput.addEventListener('input', changed);
-  for (const button of container.querySelectorAll<HTMLButtonElement>('.presets button')) {
+  const datePicked = () => {
+    setFullChat(false);
+    changed();
+  };
+  fromInput.addEventListener('input', datePicked);
+  toInput.addEventListener('input', datePicked);
+  fullChatButton.addEventListener('click', () => {
+    fromInput.value = '';
+    toInput.value = today();
+    setFullChat(true);
+    changed();
+  });
+  for (const button of container.querySelectorAll<HTMLButtonElement>('.presets button[data-days]')) {
     button.addEventListener('click', () => {
+      setFullChat(false);
       const days = Number(button.dataset.days);
       toInput.value = today();
       fromInput.value = localDay(addDays(options.today?.() ?? new Date(), 1 - days));
@@ -84,6 +108,9 @@ export const dateRangeFieldsStyles = `
   .presets button { padding: 4px 10px; border: 1px solid #d1d7db; border-radius: 14px; background: transparent;
     color: inherit; font: inherit; font-size: 12.5px; cursor: pointer; }
   .presets button:hover { border-color: #00a884; }
+  .presets button[aria-pressed="true"] { border-color: #00a884; background: rgba(0, 168, 132, .12); }
+  .full-chat-note { font-size: 12.5px; margin: 4px 0; }
+  .full-chat-note[hidden] { display: none; }
   .range-error { color: #c0392b; font-size: 12.5px; }
   .range-error:empty { display: none; }
   :host-context(body.dark) .range-error { color: #f28b82; }

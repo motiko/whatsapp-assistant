@@ -7,6 +7,7 @@ import unrelatedPage from './fixtures/unrelated-page.html?raw';
 import multiDayChat from './fixtures/multi-day-chat.html?raw';
 import readMoreChat from './fixtures/read-more-chat.html?raw';
 import { emulateReadMore } from './testing/emulate-read-more';
+import olderMessagesOnPhone from './fixtures/older-messages-on-phone.html?raw';
 import { PageNotRecognisedError } from '../core/whatsapp-page';
 
 afterEach(() => {
@@ -161,6 +162,94 @@ describe('WhatsApp Web adapter on a Chat with long messages behind "Read more"',
     const page = createWhatsAppWebPage(await loadSnapshot(readMoreChat), options);
 
     await expect(page.expandReadMore({ top: 150, bottom: 300 })).rejects.toThrow(PageNotRecognisedError);
+  });
+});
+
+describe('WhatsApp Web adapter loading older messages', () => {
+  const options = { today: () => new Date(2026, 10, 11, 15, 30), locale: 'en-GB', settleMs: 0, olderMessagesWaitMs: 100 };
+
+  /**
+   * Plays WhatsApp Web's part, which a saved snapshot can't: after `delayMs`,
+   * puts a day of older messages (20 Oct 2026, two messages) at the top of
+   * the message list, as WhatsApp Web does once it has fetched them.
+   */
+  function addOlderDayLater(doc: Document, delayMs = 30) {
+    setTimeout(() => {
+      const list = doc.querySelector('[role="application"]')!;
+      const rows = ['<div class="_amjw focusable-list-item"><span dir="auto">20/10/2026</span></div>'];
+      for (const n of [1, 2]) {
+        rows.push(`<div class="message-in focusable-list-item" data-id="false_10000000001@c.us_OLDER000${n}"><div class="_amk6">Older message ${n}.</div></div>`);
+      }
+      const older = rows.map((html) => Object.assign(doc.createElement('div'), { innerHTML: html }));
+      older.forEach((row) => row.setAttribute('role', 'row'));
+      const firstDay = Array.from(list.children).find((row) => row.querySelector('._amjw'))!;
+      firstDay.before(...older);
+    }, delayMs);
+  }
+
+  const firstDivider = (page: ReturnType<typeof createWhatsAppWebPage>) =>
+    page.loadedItems().find((item) => item.kind === 'date-divider');
+
+  test('reports that no older messages are available when nothing more loads at the top', async () => {
+    const page = createWhatsAppWebPage(await loadSnapshot(multiDayChat), options);
+    await page.scrollTo(500);
+
+    const result = await page.loadOlder();
+
+    expect(result).toBe('no-older-messages');
+    expect(page.scrollTop()).toBe(0);
+    expect(firstDivider(page)).toMatchObject({ day: '2026-10-28' });
+  });
+
+  test('loads the older messages WhatsApp Web adds when scrolled to the top', async () => {
+    const doc = await loadSnapshot(multiDayChat);
+    const page = createWhatsAppWebPage(doc, options);
+    await page.scrollTo(500);
+    const scroller = doc.querySelector('._ajyl')!;
+    scroller.addEventListener('scroll', () => scroller.scrollTop === 0 && addOlderDayLater(doc), { once: true });
+
+    const result = await page.loadOlder();
+
+    expect(result).toBe('loaded');
+    expect(firstDivider(page)).toMatchObject({ day: '2026-10-20' });
+  });
+
+  test('does not report the older-messages prompt as a divider or a message', async () => {
+    const page = createWhatsAppWebPage(await loadSnapshot(olderMessagesOnPhone), options);
+
+    // List padding 12, then the 40px prompt row, then the first divider.
+    expect(page.loadedItems()[0]).toEqual({ kind: 'date-divider', day: '2026-10-28', top: 52, bottom: 102 });
+  });
+
+  test('clicks the prompt to get older messages from the phone, and loads what arrives', async () => {
+    const doc = await loadSnapshot(olderMessagesOnPhone);
+    const page = createWhatsAppWebPage(doc, options);
+    const prompt = doc.querySelector<HTMLElement>('._ahmw [role="button"]')!;
+    let clicks = 0;
+    prompt.addEventListener('click', () => {
+      clicks++;
+      prompt.closest('[role="row"]')!.remove();
+      addOlderDayLater(doc);
+    });
+
+    const result = await page.loadOlder();
+
+    expect(result).toBe('loaded');
+    expect(clicks).toBe(1);
+    expect(firstDivider(page)).toMatchObject({ day: '2026-10-20' });
+  });
+
+  test('reports that no older messages are available when the prompt brings none (e.g. the phone is offline)', async () => {
+    const doc = await loadSnapshot(olderMessagesOnPhone);
+    const page = createWhatsAppWebPage(doc, options);
+    let clicks = 0;
+    doc.querySelector('._ahmw [role="button"]')!.addEventListener('click', () => clicks++);
+
+    const result = await page.loadOlder();
+
+    expect(result).toBe('no-older-messages');
+    expect(clicks).toBe(1);
+    expect(firstDivider(page)).toMatchObject({ day: '2026-10-28' });
   });
 });
 

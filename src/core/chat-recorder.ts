@@ -9,10 +9,13 @@ import { PageNotRecognisedError, type Rect, type WhatsAppPage } from './whatsapp
  * What to record:
  * - `date-range`: every message from the start of local day `from` to the end
  *   of local day `to` (both included, as WhatsApp Web's date dividers show days);
+ * - `full-chat`: every message WhatsApp Web can load, oldest to newest;
  * - `visible`: just the chat area currently on screen.
- * Full Chat joins this union in a later ticket.
  */
-export type ChatRecordRequest = { kind: 'visible' } | { kind: 'date-range'; from: LocalDay; to: LocalDay };
+export type ChatRecordRequest =
+  | { kind: 'visible' }
+  | { kind: 'date-range'; from: LocalDay; to: LocalDay }
+  | { kind: 'full-chat' };
 
 export interface ChatRecord {
   /** The Chat this record is of. */
@@ -34,18 +37,27 @@ export interface ChatRecord {
    * The days the Chat Record covers. For a Date Range: the first and last day
    * that have messages in the record (the first day's divider starts it, the
    * last day's last message ends it), which can be narrower than requested.
+   * For a Full Chat: the earliest day WhatsApp Web could load to the newest.
    */
   span: DaySpan;
   /** When the Chat Record was taken. */
   takenAt: Date;
   /** The Context Band's text, one entry per line. */
   contextBand: string[];
+  /**
+   * WhatsApp Web ran out of older messages before the requested Date Range's
+   * first day, so the record starts at the earliest day available (and its
+   * Context Band says so).
+   */
+  historyIncomplete: boolean;
 }
 
 export type ChatRecordOutcome =
   | { kind: 'record'; record: ChatRecord }
   /** The requested Date Range has no messages; nothing was made. */
   | { kind: 'no-messages'; from: LocalDay; to: LocalDay }
+  /** A Full Chat was requested but WhatsApp Web has no messages in the Chat; nothing was made. */
+  | { kind: 'empty-chat' }
   /** The record was cancelled through its signal; nothing was made. */
   | { kind: 'cancelled' }
   | { kind: 'failed'; reason: FailureReason; detail: string };
@@ -132,7 +144,7 @@ async function recordOnce(deps: Deps, request: ChatRecordRequest, options: Recor
   };
   try {
     run.checkpoint();
-    const outcome = request.kind === 'date-range' ? await recordDateRange(run, request) : await recordVisible(run);
+    const outcome = request.kind === 'visible' ? await recordVisible(run) : await recordDays(run, request);
     run.checkpoint();
     return outcome;
   } catch (error) {
@@ -173,12 +185,17 @@ async function finishRecord(parts: {
   span: DaySpan;
   takenAt: Date;
   stitched: Stitched;
+  /** WhatsApp Web ran out of older messages before the requested start. */
+  historyIncomplete?: boolean;
+  /** Extra Context Band lines, for example about incomplete history. */
+  notes?: string[];
   /** Throws if the record was cancelled; checked before and while the image is made. */
   checkpoint: () => void;
 }): Promise<ChatRecordOutcome> {
-  const { chatName, span, takenAt, stitched, checkpoint } = parts;
+  const { chatName, span, takenAt, stitched, checkpoint, notes } = parts;
+  const historyIncomplete = parts.historyIncomplete ?? false;
   const { area, devicePixelRatio, rows } = stitched;
-  const contextBand = contextBandText({ chatName, span, takenAt });
+  const contextBand = contextBandText({ chatName, span, takenAt, notes });
   const format = rows > maxPngChatAreaHeights * area.height ? 'pdf' : 'png';
   const fileName = chatRecordFileName(chatName, span, format);
   try {
@@ -199,7 +216,10 @@ async function finishRecord(parts: {
       })();
       image = await pdfOfImages(images, { devicePixelRatio, title: fileName.replace(/\.pdf$/, ''), createdAt: takenAt });
     }
-    return { kind: 'record', record: { chatName, format, image, fileName, span, takenAt, contextBand } };
+    return {
+      kind: 'record',
+      record: { chatName, format, image, fileName, span, takenAt, contextBand, historyIncomplete },
+    };
   } finally {
     for (const slice of stitched.slices) slice.bitmap.close();
   }
@@ -245,19 +265,28 @@ const captureOverlap = 8;
 /** Upper bound on scroll stops, so a page that never settles cannot loop forever. */
 const maxScrollStops = 10_000;
 
-async function recordDateRange(
+/**
+ * Days before and after every real day, so a Full Chat is the Date Range
+ * between them: its start is never reached, so every older message is loaded.
+ */
+const beforeEveryDay: LocalDay = '0000-00-00';
+const afterEveryDay: LocalDay = '9999-99-99';
+
+async function recordDays(
   run: Run,
-  request: { from: LocalDay; to: LocalDay },
+  request: { kind: 'date-range'; from: LocalDay; to: LocalDay } | { kind: 'full-chat' },
 ): Promise<ChatRecordOutcome> {
   const { page, camera } = run;
-  const { from, to } = request;
-  const noMessages: ChatRecordOutcome = { kind: 'no-messages', from, to };
+  const fullChat = request.kind === 'full-chat';
+  const { from, to } = fullChat ? { from: beforeEveryDay, to: afterEveryDay } : request;
+  const noMessages: ChatRecordOutcome = fullChat ? { kind: 'empty-chat' } : { kind: 'no-messages', from, to };
   const chatName = page.chatName();
   const area = page.chatArea();
   const takenAt = run.clock();
 
-  const first = await scrollToFirstDivider(run, from, area.height);
-  if (!first || first.day > to) return noMessages;
+  const start = await scrollToFirstDivider(run, from, area.height);
+  if (!start || start.divider.day > to) return noMessages;
+  const first = start.divider;
 
   // Walk down one chat-area height at a time from the first day's divider.
   // Content positions can shift between stops (WhatsApp Web loads older
@@ -327,8 +356,14 @@ async function recordDateRange(
 
   if (!lastInRange) return noMessages;
   const span = { from: first.day, to: lastInRange.day };
+  const historyIncomplete = !fullChat && !start.startReached;
+  const notes = fullChat
+    ? [`Full Chat; earliest available ${first.day}`]
+    : historyIncomplete
+      ? [`Requested from ${from}; earliest available ${first.day}`]
+      : [];
   const stitched = { slices, area, devicePixelRatio, rows: lastInRange.row, pageBreaks };
-  return finishRecord({ chatName, span, takenAt, stitched, checkpoint: run.checkpoint });
+  return finishRecord({ chatName, span, takenAt, stitched, checkpoint: run.checkpoint, historyIncomplete, notes });
 }
 
 /**
@@ -354,11 +389,17 @@ function dayAt(dividerRows: Map<LocalDay, number>, row: number): LocalDay {
 }
 
 /**
- * Scrolls until the date divider of the first day on or after `from` is
- * loaded, and returns it (in content positions read at the last stop), or
- * undefined if no day on or after `from` has messages.
+ * Scrolls (loading older messages as needed) until the date divider of the
+ * first day on or after `from` is loaded, and returns it (in content
+ * positions read at the last stop), or undefined if no day on or after
+ * `from` has messages. `startReached` is false when WhatsApp Web ran out of
+ * older messages before `from`, so the divider is the earliest available.
  */
-async function scrollToFirstDivider(run: Run, from: LocalDay, step: number) {
+async function scrollToFirstDivider(
+  run: Run,
+  from: LocalDay,
+  step: number,
+): Promise<{ divider: { day: LocalDay; top: number }; startReached: boolean } | undefined> {
   const { page } = run;
   let goingDown = false;
   let sawMessages = false;
@@ -373,17 +414,22 @@ async function scrollToFirstDivider(run: Run, from: LocalDay, step: number) {
     const index = dividers.findIndex((divider) => divider.day >= from);
 
     // A divider for `from` or later is the first such one once an earlier
-    // day's divider is loaded above it, or when nothing is above it.
-    if (index > 0 || (index === 0 && (atTop || goingDown))) return dividers[index];
+    // day's divider is loaded above it, or when it is `from`'s own divider.
+    if (index > 0 || (index === 0 && (goingDown || (atTop && dividers[0]!.day === from)))) {
+      return { divider: dividers[index]!, startReached: true };
+    }
     if (index === -1 && dividers.length > 0) goingDown = true;
     if (goingDown) {
       if (atBottom) return undefined;
       await page.scrollTo(scrollTop + step);
+    } else if (atTop) {
+      const older = await page.loadOlder();
+      run.checkpoint();
+      if (older === 'loaded') continue;
+      if (index === 0) return { divider: dividers[0]!, startReached: false };
+      if (sawMessages) throw new PageNotRecognisedError('no date dividers in the message list');
+      return undefined;
     } else {
-      if (atTop) {
-        if (sawMessages) throw new PageNotRecognisedError('no date dividers in the message list');
-        return undefined;
-      }
       await page.scrollTo(scrollTop - step);
     }
   }

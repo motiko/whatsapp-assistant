@@ -79,6 +79,31 @@ describe('the Date Range fields', () => {
     expect(error()).toBe("Dates can't be in the future.");
   });
 
+  test('preset Full Chat asks for every message, and clears From', () => {
+    const { fields, button, type, input, error } = render();
+    type('From', '2026-11-12');
+
+    button('Full Chat').click();
+
+    expect(fields.value()).toEqual({ fullChat: true });
+    expect(input('From').value).toBe('');
+    expect(error()).toBe('');
+    expect(button('Full Chat').getAttribute('aria-pressed')).toBe('true');
+  });
+
+  test.each([
+    ['choosing a From date', (r: ReturnType<typeof render>) => r.type('From', '2026-11-02')],
+    ['another preset', (r: ReturnType<typeof render>) => r.button('Last 7 days').click()],
+  ])('leave Full Chat for a Date Range on %s', (_, choose) => {
+    const fields = render();
+    fields.button('Full Chat').click();
+
+    choose(fields);
+
+    expect(fields.fields.value()).toHaveProperty('range');
+    expect(fields.button('Full Chat').getAttribute('aria-pressed')).toBe('false');
+  });
+
   test('do not offer future days in the pickers', () => {
     const { input } = render();
 

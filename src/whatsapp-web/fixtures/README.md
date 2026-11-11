@@ -19,7 +19,13 @@ today's WhatsApp Web. Replace them with real snapshots as soon as possible.
 | `group-chat.html` | An open group Chat (sender names on incoming messages), light theme |
 | `multi-day-chat.html` | A one-to-one Chat over five days (date dividers "28/10/2026", "03/11/2026", "Monday", "Yesterday", "Today" as of Wed 11 Nov 2026, in the en-GB date order), with an "unread messages" banner, long enough to scroll. It fixes every row's height (see its `<style>`) so the tests can state exact positions. |
 | `read-more-chat.html` | A one-to-one Chat of one day ("Today") in which three long messages are cut short behind a "Read more" button (`.read-more-button`, `role="button"`), long enough to scroll. Like `multi-day-chat.html` it fixes its layout (a 20px line of text, see its `<style>`) so the tests can state exact positions. A static file cannot expand anything, so the tests add WhatsApp Web's click behaviour with `../testing/emulate-read-more.ts`; with a real snapshot, check which element "Read more" really is and what a click on it does. |
+| `older-messages-on-phone.html` | `multi-day-chat.html` with WhatsApp Web's prompt "Click here to get older messages from your phone." in a 40px row above the oldest day. The prompt's markup (a `role="button"` in its own row) is a guess; a real snapshot should be taken scrolled to the very top of a Chat whose older history is only on the phone. |
 | `unrelated-page.html` | A page that is not WhatsApp Web's Chat view |
+
+A snapshot is static: WhatsApp Web's own scripts don't run in it, so nothing loads when the
+adapter scrolls to the top or clicks the older-messages prompt. The tests of `loadOlder` play
+WhatsApp Web's part themselves (they add rows of older messages to the snapshot when it
+scrolls to the top or the prompt is clicked), and check what the adapter then reports.
 
 The adapter reads divider labels relative to a given "today" and locale, so tests of
 `multi-day-chat.html` pass `today: 11 Nov 2026` and `locale: 'en-GB'`; a real snapshot
