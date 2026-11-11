@@ -23,3 +23,15 @@ _Avoid_: Screenshot, Chat History (implies the Full Chat), capture, snapshot
 **Context Band**:
 The strip added above a Chat Record stating the Chat's name, the date span covered, and when the Chat Record was taken. It never alters the WhatsApp pixels it accompanies.
 _Avoid_: Header, watermark, caption
+
+**Partial Chat Record**:
+A Chat Record saved from a run that failed partway: everything captured up to the last complete message, marked as partial in its Context Band and file name.
+_Avoid_: Incomplete record (incomplete history is a different thing), broken record
+
+**Continuation**:
+A run that picks up a failed run's Date Range right after the last message of its Partial Chat Record and runs to the original end. A Continuation can itself end in a Partial Chat Record and be continued again.
+_Avoid_: Resume, retry, restart
+
+**Gap Record**:
+A separate Chat Record of the messages missed between a Partial Chat Record and its Continuation, made only when the two don't join up.
+_Avoid_: Fill, patch
