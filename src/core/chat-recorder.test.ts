@@ -4,6 +4,7 @@ import { createChatRecorder, type ChatRecordOutcome } from './chat-recorder';
 import { drawContextBand } from './context-band';
 import { PageNotRecognisedError, type WhatsAppPage } from './whatsapp-page';
 import { createFakeCamera, readScreenPositions } from './testing/fake-camera';
+import { readPdfPages } from './testing/read-pdf';
 import { createFakeWhatsAppPage, type FakeChatDay } from './testing/fake-whatsapp-page';
 
 const viewport = { width: 1280, height: 800 };
@@ -389,6 +390,65 @@ describe('a Chat Record that cannot be made', () => {
     const outcome = await recorder.record({ kind: 'date-range', from: '2026-11-02', to: '2026-11-04' });
 
     expect(outcome).toEqual({ kind: 'failed', reason: 'capture-failed', detail: 'Tab is hidden' });
+  });
+});
+
+// A small screen, so Chats taller than ten chat areas stay within the positions
+// the fake Camera can encode: a 100px tall chat area, at (100, 40).
+const smallViewport = { width: 400, height: 200 };
+const smallChatArea = { left: 100, top: 40, width: 300, height: 100 };
+
+/** Days of a 40px divider and four 40px messages (200px each), from 1 Nov. */
+function twoHundredPixelDays(count: number): FakeChatDay[] {
+  return Array.from({ length: count }, (_, index) => ({
+    day: `2026-11-${String(index + 1).padStart(2, '0')}`,
+    messageHeights: [40, 40, 40, 40],
+  }));
+}
+
+function smallScreenRecorderFor(chat: FakeChatDay[]) {
+  const page = createFakeWhatsAppPage({ chatName: 'Alice', chatArea: smallChatArea, chat });
+  const camera = createFakeCamera({ viewport: smallViewport, page });
+  return createChatRecorder({ page, camera, clock: () => new Date('2026-11-11T13:32:05Z') });
+}
+
+describe('PNG or PDF', () => {
+  test('a Chat Record exactly ten chat areas tall is one PNG', async () => {
+    const recorder = smallScreenRecorderFor(twoHundredPixelDays(5));
+
+    const outcome = await recorder.record({ kind: 'date-range', from: '2026-11-01', to: '2026-11-05' });
+
+    // Five 200px days: 1000px, ten 100px chat areas.
+    expect(outcome).toMatchObject({
+      kind: 'record',
+      record: { format: 'png', fileName: 'Chat history - Alice - 2026-11-01 to 2026-11-05.png' },
+    });
+    if (outcome.kind !== 'record') return;
+    expect(outcome.record.image.type).toBe('image/png');
+    const image = await readScreenPositions(outcome.record.image);
+    const band = drawContextBand(outcome.record.contextBand, 300, 1).height;
+    expect(image.height).toBe(band + 1000);
+    expect(image.at(0, band + 999)).toEqual({ x: 100, y: 999 });
+  });
+
+  test('a Chat Record taller than ten chat areas is a PDF, saved under the standard name with .pdf', async () => {
+    const chat = twoHundredPixelDays(5);
+    chat[4]!.messageHeights = [40, 40, 40, 41];
+    const recorder = smallScreenRecorderFor(chat);
+
+    const outcome = await recorder.record({ kind: 'date-range', from: '2026-11-01', to: '2026-11-05' });
+
+    // 1001px: one row more than ten chat areas.
+    expect(outcome).toMatchObject({
+      kind: 'record',
+      record: { format: 'pdf', fileName: 'Chat history - Alice - 2026-11-01 to 2026-11-05.pdf' },
+    });
+    if (outcome.kind !== 'record') return;
+    expect(outcome.record.image.type).toBe('application/pdf');
+    const pages = await readPdfPages(outcome.record.image);
+    expect(pages.length).toBeGreaterThan(1);
+    const last = pages.at(-1)!;
+    expect(last.at(299, last.height - 1)).toEqual({ x: 399, y: 1000 });
   });
 });
 
