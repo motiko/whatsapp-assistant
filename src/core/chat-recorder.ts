@@ -76,14 +76,22 @@ export interface ContinuationPoint {
   partialFileName: string;
 }
 
+/**
+ * What a Continuation's gap check found when its first message was not the
+ * one right after the Partial Chat Record's last: a Gap Record of exactly
+ * the messages in between, or why they could not be recorded.
+ */
+export type GapCheck = { kind: 'record'; record: ChatRecord } | { kind: 'failed'; reason: FailureReason; detail: string };
+
 export type ChatRecordOutcome =
-  | { kind: 'record'; record: ChatRecord }
+  /** `gap` only for a Continuation that missed messages after the Partial Chat Record it continues. */
+  | { kind: 'record'; record: ChatRecord; gap?: GapCheck }
   /**
    * The run failed part-way, after capturing at least one whole message:
    * `record` is a Partial Chat Record of everything up to the last complete
    * message, and `continuation` says where a Continuation would pick up.
    */
-  | { kind: 'partial'; record: ChatRecord; continuation: ContinuationPoint; reason: FailureReason; detail: string }
+  | { kind: 'partial'; record: ChatRecord; continuation: ContinuationPoint; reason: FailureReason; detail: string; gap?: GapCheck }
   /** The requested Date Range has no messages; nothing was made. */
   | { kind: 'no-messages'; from: LocalDay; to: LocalDay }
   /** A Full Chat was requested but WhatsApp Web has no messages in the Chat; nothing was made. */
@@ -375,31 +383,79 @@ async function recordContinuation(run: Run, point: ContinuationPoint): Promise<C
   const failure = await walkCatching(run, area, located.start, { kind: 'day', to }, walked);
   const spanFrom = located.after ? (walked.firstMessage?.day ?? last.day) : located.day;
   const record = { run, chatName, takenAt, area, walked, notes, spanFrom };
-  if (failure) return partialRecord({ ...record, request: point.request, error: failure.error });
-  if (!walked.lastInRange) {
+  let outcome: Extract<ChatRecordOutcome, { kind: 'record' | 'partial' }>;
+  if (failure) outcome = await partialRecord({ ...record, request: point.request, error: failure.error });
+  else if (!walked.lastInRange) {
     closeSlices(walked.slices);
     return nothingAfter;
+  } else outcome = { kind: 'record', record: await wholeRecord(record) };
+
+  // The gap check: the first message captured should be the one right after
+  // `last`. An overlap (starting from the day's divider) never misses any.
+  const first = walked.firstMessage;
+  if (!located.after || !located.follower || !first || first.id === located.follower) return outcome;
+  const gap = await recordGap(run, {
+    chatName,
+    takenAt,
+    area,
+    point,
+    before: first.id,
+    continuationFileName: outcome.record.fileName,
+  });
+  return gap ? { ...outcome, gap } : outcome;
+}
+
+/**
+ * A Gap Record of the messages between the last message of a Partial Chat
+ * Record (`point`) and message `before`, the first one its Continuation
+ * captured; undefined if there are none after all.
+ */
+async function recordGap(
+  run: Run,
+  parts: { chatName: string; takenAt: Date; area: Rect; point: ContinuationPoint; before: string; continuationFileName: string },
+): Promise<GapCheck | undefined> {
+  const { chatName, takenAt, area, point } = parts;
+  const walked = newWalked();
+  try {
+    const located = await scrollToContinue(run, point.lastMessage, area.height);
+    if (!located?.after) throw new Error('the last message of the Partial Chat Record could not be found again');
+    await walk(run, area, located.start, { kind: 'before-message', id: parts.before }, walked);
+  } catch (error) {
+    closeSlices(walked.slices);
+    if (error instanceof Cancelled || run.cancelled()) throw new Cancelled();
+    return { kind: 'failed', reason: failureReason(error), detail: errorMessage(error) };
   }
-  return { kind: 'record', record: await wholeRecord(record) };
+  if (!walked.lastInRange) {
+    closeSlices(walked.slices);
+    return undefined;
+  }
+  const notes = [`Gap: messages missed between “${point.partialFileName}” and “${parts.continuationFileName}”`];
+  const spanFrom = walked.firstMessage?.day ?? point.lastMessage.day;
+  const record = await wholeRecord({ run, chatName, takenAt, area, walked, notes, spanFrom, mark: 'gap' });
+  return { kind: 'record', record };
 }
 
 /**
  * Scrolls (loading older messages as needed) to where a Continuation starts:
  * right after message `last`, found by its id, or, if it cannot be found,
  * the start of its day (or of the first later day with messages). Resolves
- * with where the walk starts, whether it is right after `last`, and the
- * first day it covers; or undefined if no day from `last`'s on has messages.
+ * with where the walk starts, whether it is right after `last` (and if so,
+ * the id of the message that follows it, when loaded), and the first day it
+ * covers; or undefined if no day from `last`'s on has messages.
  */
 async function scrollToContinue(
   run: Run,
   last: ContinuationPoint['lastMessage'],
   step: number,
-): Promise<{ start: WalkStart; after: boolean; day: LocalDay } | undefined> {
+): Promise<{ start: WalkStart; after: boolean; day: LocalDay; follower?: string } | undefined> {
   const found = await scrollToFirstDivider(run, last.day, step);
   if (!found) return undefined;
   if (found.divider.day === last.day) {
-    const message = await scrollToMessage(run, last, step);
-    if (message) return { start: afterMessageStart(message, last.day), after: true, day: last.day };
+    const located = await scrollToMessage(run, last, step);
+    if (located) {
+      const { message, follower } = located;
+      return { start: afterMessageStart(message, last.day), after: true, day: last.day, follower };
+    }
     // Not there any more: start from its day's divider, which has scrolled out of reach meanwhile.
     const again = await scrollToFirstDivider(run, last.day, step);
     if (!again) return undefined;
@@ -413,21 +469,29 @@ type Message = Extract<ChatItem, { kind: 'message' }>;
 /**
  * Scrolls down from day `last.day`'s divider (loaded at the current stop)
  * until message `last` is loaded, shows it in full, and returns it (in
- * content positions read at the last stop); or undefined once the next day
- * or the end of the Chat is reached without it.
+ * content positions read at the last stop) with the id of the message after
+ * it, if loaded; or undefined once the next day or the end of the Chat is
+ * reached without it.
  */
-async function scrollToMessage(run: Run, last: { id: string; day: LocalDay }, step: number): Promise<Message | undefined> {
+async function scrollToMessage(
+  run: Run,
+  last: { id: string; day: LocalDay },
+  step: number,
+): Promise<{ message: Message; follower?: string } | undefined> {
   const { page } = run;
-  const find = () =>
-    page.loadedItems().find((item): item is Message => item.kind === 'message' && item.id === last.id);
+  const isLast = (item: ChatItem): item is Message => item.kind === 'message' && item.id === last.id;
   for (let stop = 0; stop < maxScrollStops; stop++) {
     run.checkpoint();
-    const message = find();
+    const message = page.loadedItems().find(isLast);
     if (message) {
       // Its Partial Chat Record showed it in full, so start below it in full too.
       await page.expandReadMore({ top: message.top, bottom: message.bottom });
       run.checkpoint();
-      return find();
+      const items = page.loadedItems();
+      const index = items.findIndex(isLast);
+      if (index === -1) continue;
+      const follower = items.slice(index + 1).find((item) => item.kind === 'message');
+      return { message: items[index] as Message, ...(follower?.kind === 'message' ? { follower: follower.id } : {}) };
     }
     const scrollTop = page.scrollTop();
     const nextDay = page.loadedItems().find((item) => item.kind === 'date-divider' && item.day > last.day);
@@ -477,7 +541,9 @@ async function wholeRecord(parts: RecordParts & { mark?: 'gap' }): Promise<ChatR
  * stopped, and where a Continuation of `request` would pick up. Rethrows
  * `error` when no message was captured in full.
  */
-async function partialRecord(parts: RecordParts & { request: RangeRequest; error: unknown }): Promise<ChatRecordOutcome> {
+async function partialRecord(
+  parts: RecordParts & { request: RangeRequest; error: unknown },
+): Promise<Extract<ChatRecordOutcome, { kind: 'partial' }>> {
   const { run, walked, area, error } = parts;
   const last = walked.lastComplete;
   if (!last) {
@@ -531,8 +597,8 @@ function dividerStart(divider: DateDivider): WalkStart {
   };
 }
 
-/** Where a walk ends: after the last message of day `to`. */
-type WalkEnd = { kind: 'day'; to: LocalDay };
+/** Where a walk ends: after the last message of day `to`, or after the last message before message `id`. */
+type WalkEnd = { kind: 'day'; to: LocalDay } | { kind: 'before-message'; id: string };
 
 /** What a walk has captured so far, kept up to date so it can still be used when the walk fails part-way. */
 interface Walked {
@@ -583,8 +649,10 @@ async function walkCatching(
  */
 async function walk(run: Run, area: Rect, start: WalkStart, end: WalkEnd, walked: Walked): Promise<void> {
   const { page, camera } = run;
-  const { to } = end;
+  const to = end.kind === 'day' ? end.to : afterEveryDay;
   const dividerRows = new Map(start.dividerRows);
+  /** The day at row 0. A divider of a later day above row 0 still dates the messages below it. */
+  const startDay = [...start.dividerRows.keys()].sort().at(-1)!;
   /**
    * The record rows of the tops of rows already captured, by `itemKey`. Only
    * these are fixed points: a row further down may move when a long message
@@ -595,6 +663,8 @@ async function walk(run: Run, area: Rect, start: WalkStart, end: WalkEnd, walked
   const { pageBreaks, slices } = walked;
   let origin = start.origin;
   let endKnown = false;
+  /** For a walk that ends before a message: that message's record row, once seen. */
+  let endMessageRow: number | undefined;
   let covered = 0;
   /** Scrolls in a row that landed below where the Chat Record continues. */
   let missedScrolls = 0;
@@ -615,13 +685,17 @@ async function walk(run: Run, area: Rect, start: WalkStart, end: WalkEnd, walked
       const bottom = item.bottom - origin;
       if (top > 0) pageBreaks.add(top);
       if (item.kind === 'date-divider') {
-        if (top < 0) continue;
+        if (top < 0 && item.day <= startDay) continue;
         dividerRows.set(item.day, top);
         if (item.day > to) endKnown = true;
         day = item.day;
         continue;
       }
-      if (top < 0) continue;
+      if (end.kind === 'before-message' && item.id === end.id) {
+        endKnown = true;
+        endMessageRow = top;
+      }
+      if (top < 0 || (endMessageRow !== undefined && top >= endMessageRow)) continue;
       day ??= dayAt(dividerRows, top);
       if (day > to) continue;
       inRange.push({ item, top, bottom, day });

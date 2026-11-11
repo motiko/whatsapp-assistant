@@ -1274,6 +1274,7 @@ describe('a Continuation', () => {
     });
     const rows = [...(await chatRows(partial)), ...(await chatRows(outcome))];
     expect(rows).toEqual(range540To(2160));
+    expect(outcome).not.toHaveProperty('gap'); // the records join
   });
 
   test('picks up mid-day, finding the message again while WhatsApp Web loads older messages and slides its list', async () => {
@@ -1319,6 +1320,7 @@ describe('a Continuation', () => {
       },
     });
     expect(await chatRows(outcome)).toEqual(range540To(2160));
+    expect(outcome).not.toHaveProperty('gap'); // an overlap is not a gap
   });
 
   test('of a Full Chat runs to the newest message', async () => {
@@ -1384,3 +1386,87 @@ function rowsFrom(from: number, to: number): number[] {
 function range540To(to: number): number[] {
   return rowsFrom(540, to);
 }
+
+describe('the gap check after a Continuation', () => {
+  const range = { kind: 'date-range', from: '2026-11-01', to: '2026-11-04' } as const;
+  const clock = () => new Date('2026-11-11T13:32:05Z');
+
+  /**
+   * The partial record of 1-4 Nov (its first screen, 0-678, holds 1 Nov in
+   * full: its last message ends at 540), and a Continuation on a WhatsApp Web
+   * that, until the first screen is captured, reports that last message as
+   * reaching down to 780 (over 2 Nov's divider and first two messages). So the
+   * Continuation starts too low, at 2 Nov's third message (780-880).
+   */
+  async function continuationStartingTooLow(options: { gapCaptureFails?: boolean } = {}) {
+    const failing = createFakeWhatsAppPage({ chatName: 'Alice', chatArea, chat: sixDays });
+    const partial = await createChatRecorder({
+      page: failing,
+      camera: createFakeCamera({ viewport, page: failing, fails: new Error('Tab is hidden'), failsAfter: 1 }),
+      clock,
+    }).record(range);
+    if (partial.kind !== 'partial') throw new Error(`expected a Partial Chat Record, got ${partial.kind}`);
+
+    const fake = createFakeWhatsAppPage({ chatName: 'Alice', chatArea, chat: sixDays });
+    let glitching = true;
+    const page: WhatsAppPage = {
+      ...fake,
+      loadedItems: () =>
+        fake
+          .loadedItems()
+          .map((item) => (glitching && item.kind === 'message' && item.id === '2026-11-01 #5' ? { ...item, bottom: item.bottom + 240 } : item)),
+    };
+    // The Continuation captures 780-2160: three screens.
+    const screen = createFakeCamera({
+      viewport,
+      page: fake,
+      ...(options.gapCaptureFails ? { fails: new Error('Tab is hidden'), failsAfter: 3 } : {}),
+    });
+    const camera = {
+      capture() {
+        glitching = false;
+        return screen.capture();
+      },
+    };
+    const outcome = await createChatRecorder({ page, camera, clock }).record({ kind: 'continuation', from: partial.continuation });
+    return { partial, outcome };
+  }
+
+  test('records the messages a Continuation missed as a separate Gap Record, every row exactly once', async () => {
+    const { partial, outcome } = await continuationStartingTooLow();
+
+    expect(outcome).toMatchObject({
+      kind: 'record',
+      record: { fileName: 'Chat history - Alice - 2026-11-02 to 2026-11-04.png' },
+      gap: {
+        kind: 'record',
+        record: {
+          span: { from: '2026-11-02', to: '2026-11-02' },
+          fileName: 'Chat history - Alice - 2026-11-02 (gap).png',
+          contextBand: [
+            'Chat: Alice',
+            'Messages: 2026-11-02',
+            'Taken: 2026-11-11 14:32 (UTC+01:00)',
+            'Gap: messages missed between “Chat history - Alice - 2026-11-01 (partial).png” and “Chat history - Alice - 2026-11-02 to 2026-11-04.png”',
+          ],
+        },
+      },
+    });
+    if (outcome.kind !== 'record' || outcome.gap?.kind !== 'record') return;
+    // The Gap Record is exactly 2 Nov's divider and first two messages (540-780).
+    expect(await chatRows(outcome.gap.record)).toEqual(rowsFrom(540, 780));
+    expect([...(await chatRows(partial)), ...(await chatRows(outcome.gap.record)), ...(await chatRows(outcome))]).toEqual(
+      rowsFrom(0, 2160),
+    );
+  });
+
+  test('says so when the missed messages cannot be recorded, and keeps the Continuation', async () => {
+    const { outcome } = await continuationStartingTooLow({ gapCaptureFails: true });
+
+    expect(outcome).toMatchObject({
+      kind: 'record',
+      record: { span: { from: '2026-11-02', to: '2026-11-04' } },
+      gap: { kind: 'failed', reason: 'capture-failed', detail: 'Tab is hidden' },
+    });
+  });
+});
