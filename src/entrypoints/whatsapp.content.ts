@@ -1,5 +1,6 @@
 import { createChatRecorder } from '../core/chat-recorder';
 import { copyPngToClipboard } from '../extension/clipboard';
+import { downloadFile } from '../extension/download';
 import { isOpenPanelRequest } from '../extension/messages';
 import { createTabCamera } from '../extension/tab-camera';
 import { createRecordPanel, type CreateResult } from '../ui/record-panel';
@@ -21,7 +22,7 @@ export default defineContentScript({
         }
       },
       createChatRecord() {
-        if (recording) return Promise.resolve({ kind: 'failed', reason: 'capture-failed', detail: 'a Chat Record is already being made' });
+        if (recording) return Promise.resolve({ kind: 'failed', reason: 'busy', detail: 'a Chat Record is already being made' });
         recording = true;
         const outcome = recorder.record({ kind: 'visible' });
         // Start the clipboard write now, inside the click, with the PNG to follow.
@@ -31,12 +32,16 @@ export default defineContentScript({
         return Promise.all([outcome, copied.then(() => undefined, (error: unknown) => error)])
           .then(([o, clipboardError]): CreateResult => {
             if (o.kind === 'failed') return o;
-            if (clipboardError) return { kind: 'failed', reason: 'clipboard-failed', detail: String(clipboardError) };
-            return { kind: 'copied' };
+            const file = { name: o.record.fileName, image: o.record.image };
+            if (clipboardError) return { kind: 'made', file, clipboard: { copied: false, detail: String(clipboardError) } };
+            return { kind: 'made', file, clipboard: { copied: true } };
           })
           .finally(() => {
             recording = false;
           });
+      },
+      download(file) {
+        downloadFile(document, file.image, file.name);
       },
     });
 
