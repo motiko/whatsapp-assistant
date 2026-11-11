@@ -14,7 +14,7 @@ export interface DateRangeFields {
 
 /**
  * The panel's From and To date pickers with the Today, Last 7 days,
- * Last 30 days and Full Chat presets. Days are whole local days, both ends
+ * Last 30 days, Year to date, Last 2 years and Full Chat presets. Days are whole local days, both ends
  * included, so "Last 7 days" is today and the six days before it. To starts
  * at today; From must not be after To, and neither may be in the future.
  * Full Chat clears From and stands for every message; choosing a date or
@@ -35,6 +35,8 @@ export function createDateRangeFields(
       <button type="button" data-days="1">Today</button>
       <button type="button" data-days="7">Last 7 days</button>
       <button type="button" data-days="30">Last 30 days</button>
+      <button type="button" data-preset="year-to-date">Year to date</button>
+      <button type="button" data-years="2">Last 2 years</button>
       <button type="button" class="full-chat" aria-pressed="false">Full Chat</button>
     </div>
     <p class="full-chat-note" hidden>Every message WhatsApp Web can load, from the oldest to the newest.</p>
@@ -85,12 +87,11 @@ export function createDateRangeFields(
     setFullChat(true);
     changed();
   });
-  for (const button of container.querySelectorAll<HTMLButtonElement>('.presets button[data-days]')) {
+  for (const button of container.querySelectorAll<HTMLButtonElement>('.presets button:not(.full-chat)')) {
     button.addEventListener('click', () => {
       setFullChat(false);
-      const days = Number(button.dataset.days);
       toInput.value = today();
-      fromInput.value = localDay(addDays(options.today?.() ?? new Date(), 1 - days));
+      fromInput.value = localDay(presetStart(button.dataset, options.today?.() ?? new Date()));
       changed();
     });
   }
@@ -115,6 +116,21 @@ export const dateRangeFieldsStyles = `
   .range-error:empty { display: none; }
   :host-context(body.dark) .range-error { color: #f28b82; }
 `;
+
+/**
+ * The first day a preset covers, ending today: the last N days, the year so
+ * far, or the last N years (today and the N years before it, like the last
+ * N days).
+ */
+function presetStart(preset: DOMStringMap, now: Date): Date {
+  if (preset.preset === 'year-to-date') return new Date(now.getFullYear(), 0, 1);
+  if (preset.years) {
+    const start = new Date(now);
+    start.setFullYear(now.getFullYear() - Number(preset.years));
+    return addDays(start, 1);
+  }
+  return addDays(now, 1 - Number(preset.days));
+}
 
 function addDays(date: Date, days: number): Date {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate() + days);

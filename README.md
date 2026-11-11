@@ -13,7 +13,7 @@ Current state ([#2](https://github.com/motiko/whatsapp-assistant/issues/2) walki
 [#7](https://github.com/motiko/whatsapp-assistant/issues/7) Full Chat and incomplete history; together
 the whole of [#1](https://github.com/motiko/whatsapp-assistant/issues/1)):
 a button in the open Chat's header opens a panel where you pick a **Date Range** (From/To pickers
-or the Today, Last 7 days and Last 30 days presets) or the **Full Chat**. **Create Chat Record**
+or the Today, Last 7 days, Last 30 days, Year to date and Last 2 years presets) or the **Full Chat**. **Create Chat Record**
 scrolls the Chat to the range itself, loading older messages as needed (including clicking WhatsApp
 Web's prompt to get them from the phone), expands every "Read more" so long messages show in full,
 captures as many screens as needed and copies them, stitched, to the clipboard as one PNG, with a
@@ -59,8 +59,8 @@ navigated away, and also opens the panel. If you skip it, the panel tells you to
 
 1. Open a Chat. A camera button appears in the Chat header, left of WhatsApp's own icons.
 2. Click it. The panel names the Chat the Chat Record will be of.
-3. Pick **From** and **To** (To starts at today), or click **Today**, **Last 7 days** or
-   **Last 30 days**. Days are whole days in your computer's timezone, both ends included, as
+3. Pick **From** and **To** (To starts at today), or click **Today**, **Last 7 days**,
+   **Last 30 days**, **Year to date** or **Last 2 years**. Days are whole days in your computer's timezone, both ends included, as
    WhatsApp Web's date dividers show them. From can't be after To, and neither in the future.
    Or click **Full Chat** for every message WhatsApp Web can load (picking a date or another preset
    goes back to a Date Range).
@@ -183,7 +183,7 @@ Needs a logged-in WhatsApp Web, so it is not automated. Use a fresh `npm run bui
 - [ ] Open the panel: To shows today, From is empty and **Create Chat Record** is disabled.
 - [ ] Neither picker offers a day after today. Typing a future day says "Dates can't be in the future."
 - [ ] From after To says "From can't be after To." and keeps Create disabled.
-- [ ] **Today**, **Last 7 days** and **Last 30 days** fill From/To with today, today minus 6 and today minus 29.
+- [ ] **Today**, **Last 7 days** and **Last 30 days** fill From/To with today, today minus 6 and today minus 29; **Year to date** with 1 January to today; **Last 2 years** with the day after the same date two years ago to today.
 - [ ] In a Chat with messages over several days, pick a range of 2-4 days that is more than one screen tall
       and well above the newest messages. Create: the Chat scrolls up on its own, then down screen by screen.
 - [ ] Paste the PNG: below the Context Band it starts with the From day's date divider (or the first later

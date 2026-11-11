@@ -49,6 +49,8 @@ describe('the Date Range fields', () => {
     ['Today', '2026-11-11', '2026-11-11'],
     ['Last 7 days', '2026-11-05', '2026-11-11'],
     ['Last 30 days', '2026-10-13', '2026-11-11'],
+    ['Year to date', '2026-01-01', '2026-11-11'],
+    ['Last 2 years', '2024-11-12', '2026-11-11'],
   ])('preset %s picks whole days up to and including today', (preset, from, to) => {
     const { fields, button, type, input } = render();
     type('To', '2026-11-01');
