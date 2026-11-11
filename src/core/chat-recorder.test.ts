@@ -122,6 +122,35 @@ describe('Context Band', () => {
   });
 });
 
+describe('file name', () => {
+  test("names the Chat Record after the Chat and the single day it covers", async () => {
+    const recorder = createChatRecorder({
+      page: createFakeWhatsAppPage({ chatName: 'Alice', chatArea }),
+      camera: createFakeCamera({ viewport }),
+      clock: () => new Date('2026-11-11T13:32:05Z'),
+    });
+
+    const outcome = await recorder.record({ kind: 'visible' });
+
+    expect(outcome).toMatchObject({ kind: 'record', record: { fileName: 'Chat history - Alice - 2026-11-11.png' } });
+  });
+
+  test('replaces characters a file name cannot hold, and keeps emoji', async () => {
+    const recorder = createChatRecorder({
+      page: createFakeWhatsAppPage({ chatName: 'Mum/Dad: 🏡 plans', chatArea }),
+      camera: createFakeCamera({ viewport }),
+      clock: () => new Date('2026-11-11T13:32:05Z'),
+    });
+
+    const outcome = await recorder.record({ kind: 'visible' });
+
+    expect(outcome).toMatchObject({
+      kind: 'record',
+      record: { chatName: 'Mum/Dad: 🏡 plans', fileName: 'Chat history - Mum_Dad_ 🏡 plans - 2026-11-11.png' },
+    });
+  });
+});
+
 describe('a Chat Record that cannot be made', () => {
   test('fails, producing nothing, when the screen cannot be captured', async () => {
     const recorder = createChatRecorder({

@@ -1,6 +1,7 @@
 import { CaptureNotAllowedError, type Camera } from './camera';
 import { contextBandText, withContextBand } from './context-band';
 import { localDayOf, type DaySpan } from './day-span';
+import { chatRecordFileName } from './file-name';
 import { PageNotRecognisedError, type Rect, type WhatsAppPage } from './whatsapp-page';
 
 /**
@@ -15,6 +16,8 @@ export interface ChatRecord {
   format: 'png';
   /** The Context Band above WhatsApp Web's own pixels, encoded as `format`. */
   image: Blob;
+  /** The name to save it under, for example `Chat history - Alice - 2026-11-11.png`. */
+  fileName: string;
   /** The days the Chat Record covers. */
   span: DaySpan;
   /** When the Chat Record was taken. */
@@ -69,7 +72,8 @@ async function recordVisible(deps: Required<ChatRecorderDeps>): Promise<ChatReco
   const contextBand = contextBandText({ chatName, span, takenAt });
   const withBand = withContextBand(pixels, contextBand, screenshot.devicePixelRatio);
   const image = await withBand.convertToBlob({ type: 'image/png' });
-  return { kind: 'record', record: { chatName, format: 'png', image, span, takenAt, contextBand } };
+  const fileName = chatRecordFileName(chatName, span, 'png');
+  return { kind: 'record', record: { chatName, format: 'png', image, fileName, span, takenAt, contextBand } };
 }
 
 /**
