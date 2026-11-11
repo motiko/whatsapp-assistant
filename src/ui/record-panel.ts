@@ -1,6 +1,9 @@
-import type { FailureReason } from '../core/chat-recorder';
+import type { ChatRecordRequest, FailureReason } from '../core/chat-recorder';
 import type { LocalDay } from '../core/day-span';
-import { createDateRangeFields, dateRangeFieldsStyles, type DateRange } from './date-range-fields';
+import { createDateRangeFields, dateRangeFieldsStyles } from './date-range-fields';
+
+/** What the panel asks to record: a Date Range or the Full Chat. */
+export type PanelRequest = Exclude<ChatRecordRequest, { kind: 'visible' }>;
 
 /** A Chat Record ready to save: its image and the file name to save it under. */
 export interface RecordFile {
@@ -18,6 +21,8 @@ export type CreateResult =
     }
   /** The chosen Date Range has no messages; nothing was made. */
   | { kind: 'no-messages'; from: LocalDay; to: LocalDay }
+  /** A Full Chat was asked for, but the Chat has no messages; nothing was made. */
+  | { kind: 'empty-chat' }
   | { kind: 'failed'; reason: FailureReason | 'busy'; detail: string };
 
 export interface RecordPanel {
@@ -39,7 +44,7 @@ export function createRecordPanel(
     /** The open Chat's name, or undefined if it cannot be read. */
     chatName: () => string | undefined;
     /** Must start any clipboard write synchronously (see `copyPngToClipboard`). */
-    createChatRecord: (range: DateRange) => Promise<CreateResult>;
+    createChatRecord: (request: PanelRequest) => Promise<CreateResult>;
     /** Saves the file to the Downloads folder; throws if it can't. */
     download: (file: RecordFile) => void;
   },
@@ -122,13 +127,14 @@ export function createRecordPanel(
 
   createButton.addEventListener('click', () => {
     const chosen = dateRange.value();
-    if (!('range' in chosen)) return;
+    if ('error' in chosen) return;
+    const request: PanelRequest = 'fullChat' in chosen ? { kind: 'full-chat' } : { kind: 'date-range', ...chosen.range };
     busy = true;
     updateCreateButton();
     offerDownload(undefined);
     show('Making the Chat Record…', 'working');
     options
-      .createChatRecord(chosen.range)
+      .createChatRecord(request)
       .then((result) => {
         if (result.kind === 'failed') {
           show(failureMessage(result.reason, result.detail), 'error');
@@ -136,6 +142,10 @@ export function createRecordPanel(
         }
         if (result.kind === 'no-messages') {
           show(noMessagesText(result.from, result.to), 'error');
+          return;
+        }
+        if (result.kind === 'empty-chat') {
+          show('This Chat has no messages WhatsApp Web can load. Nothing was copied.', 'error');
           return;
         }
         offerDownload(result.file);
