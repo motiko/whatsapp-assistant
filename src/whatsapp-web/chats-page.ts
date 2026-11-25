@@ -59,7 +59,9 @@ export function createChatsPage(doc: Document, options: ChatsPageOptions = {}): 
         .filter((name): name is string => name !== undefined);
     },
     chatListRow(name) {
-      const row = findRow(doc, name);
+      const named = chatListRows(doc).filter((row) => rowName(row) === name);
+      // Two Chats of that name: which one's message it is can't be told.
+      const row = named.length === 1 ? named[0] : undefined;
       return row ? readRow(row) : undefined;
     },
     async openChat(name) {
@@ -78,6 +80,15 @@ export function createChatsPage(doc: Document, options: ChatsPageOptions = {}): 
           replaceText(doc, search, '');
           throw new Error(`no Chat named "${name}" in WhatsApp Web`);
         }
+      }
+      try {
+        refuseIfAmbiguous(doc, name);
+      } catch (error) {
+        if (searched) {
+          const search = doc.querySelector<HTMLElement>(selectors.chatSearch);
+          if (search) replaceText(doc, search, '');
+        }
+        throw error;
       }
       clickLikeAUser(row.querySelector(selectors.chatListTitle) ?? row);
       const opened = await waitUntil(doc, () => openChatName() === name, openWaitMs);
@@ -229,6 +240,16 @@ function rowName(row: Element): string | undefined {
 
 function findRow(doc: Document, name: string): Element | undefined {
   return chatListRows(doc).find((row) => rowName(row) === name);
+}
+
+/**
+ * Chats are known by name only, so two with the same name (a group renamed
+ * like a contact, say) can't be told apart: then neither is read or written to.
+ */
+function refuseIfAmbiguous(doc: Document, name: string): void {
+  if (chatListRows(doc).filter((row) => rowName(row) === name).length > 1) {
+    throw new Error(`more than one Chat in WhatsApp Web is named "${name}"; rename one, so messages can't go to the wrong Chat`);
+  }
 }
 
 /** The open Chat's messages, in page order (messages quoted inside others left out). */

@@ -65,6 +65,17 @@ describe('opening a Chat', () => {
     expect(doc.querySelector<HTMLElement>('#side [contenteditable]')!.innerText.trim()).toBe('');
   });
 
+  test('refuses a name two Chats share, rather than maybe open the wrong one', async () => {
+    const doc = await loadSnapshot(translatedChat);
+    emulateChats(doc);
+    const row = Array.from(doc.querySelectorAll('#pane-side [role="listitem"]')).find((item) => item.textContent?.includes('Contact D'))!;
+    row.after(row.cloneNode(true));
+    const page = createChatsPage(doc, fast);
+
+    await expect(page.openChat('Contact D')).rejects.toThrow('more than one Chat in WhatsApp Web is named "Contact D"');
+    expect(page.chatListRow('Contact D')).toBeUndefined();
+  });
+
   test('fails for a Chat WhatsApp Web can’t find', async () => {
     const doc = await loadSnapshot(translatedChat);
     emulateChats(doc);
