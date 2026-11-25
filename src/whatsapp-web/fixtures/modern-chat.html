@@ -1,0 +1,154 @@
+<!doctype html>
+<!--
+  SYNTHETIC SNAPSHOT, shaped after a masked diagnosis of the real page (Nov 2026):
+  message rows hold a `data-id` that is only the message's key (no true_/false_
+  prefix), there are no message-in/message-out classes, Chat list rows are
+  role="row" (no listitem), and the message box has no send icon while empty.
+  Who sent a message shows only in which side its bubble sits on. A one-to-one
+  Chat "Contact A" is open. It is NOT a saved copy of the real page.
+  The last message, a voice note (play button, progress slider, its length
+  "0:23"), is guessed: the voice-note diagnosis hasn't been run on the real page.
+  See README.md in this folder for how to replace it with a real, scrubbed one.
+-->
+<html lang="en" dir="ltr">
+<head>
+<meta charset="utf-8">
+<title>WhatsApp</title>
+<style>
+  /* Layout (CSS px) the adapter tests rely on, for a 1280x800 viewport:
+     nav rail 64 wide, Chat list 400 wide, Chat header 59 tall,
+     message box (footer) 62 tall, 6px message-list scrollbar. */
+  html, body { margin: 0; height: 100%; overflow: hidden; font: 14.2px "Segoe UI", Helvetica, Arial, sans-serif; }
+  body { background: #eae6df; color: #111b21; }
+  #app { height: 100%; }
+  ._aigs { display: flex; height: 100%; }
+  ._aigt { width: 64px; flex: none; background: #f0f2f5; border-right: 1px solid #d1d7db; box-sizing: border-box; }
+  ._aigw { width: 400px; flex: none; background: #fff; border-right: 1px solid #d1d7db; box-sizing: border-box; overflow: hidden; }
+  ._aigv { flex: 1; min-width: 0; position: relative; }
+  #main { display: flex; flex-direction: column; height: 100%; background: #efeae2; }
+  #main > header { height: 59px; flex: none; display: flex; align-items: center; padding: 0 16px; box-sizing: border-box; background: #f0f2f5; border-left: 1px solid #d1d7db; }
+  ._amie { display: flex; align-items: center; }
+  ._amie.title { flex: 1; min-width: 0; flex-direction: column; align-items: flex-start; margin-left: 15px; }
+  ._ak1r { display: flex; gap: 10px; }
+  .copyable-area { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  ._ajyl { flex: 1; min-height: 0; overflow-y: scroll; overflow-x: hidden; }
+  ._ajyl::-webkit-scrollbar { width: 6px; }
+  ._ajyl::-webkit-scrollbar-thumb { background: rgba(11, 20, 26, .2); }
+  ._list { padding: 12px 63px 8px; }
+  ._amjw { display: flex; justify-content: center; margin: 12px 0; }
+  ._amjw span { background: #fff; border-radius: 7.5px; padding: 5px 12px; font-size: 12.5px; text-transform: uppercase; color: #54656f; }
+  .message-in, .message-out { display: flex; margin-bottom: 2px; }
+  .message-out { justify-content: flex-end; }
+  ._amk6 { max-width: 65%; border-radius: 7.5px; padding: 6px 7px 8px 9px; box-shadow: 0 1px .5px rgba(11,20,26,.13); }
+  .message-in ._amk6 { background: #fff; }
+  .message-out ._amk6 { background: #d9fdd3; }
+  ._amk4 { font-size: 11px; color: #667781; float: right; margin: 6px 0 -5px 8px; }
+  ._ak1i { height: 62px; flex: none; background: #f0f2f5; display: flex; align-items: center; padding: 5px 16px; box-sizing: border-box; }
+  ._ak1i [contenteditable] { flex: 1; background: #fff; border-radius: 8px; padding: 9px 12px; }
+  #side > header { height: 59px; }
+  #side [contenteditable] { margin: 8px; padding: 6px; background: #f0f2f5; border-radius: 8px; }
+  [role="listitem"] { padding: 12px 16px; border-bottom: 1px solid #e9edef; }
+  .unread { background: #25d366; color: #fff; border-radius: 10px; padding: 0 6px; }
+  ._ak1i button { margin-left: 8px; }
+  .wrap { display: flex; }
+  .wrap.start { justify-content: flex-start; }
+  .wrap.end { justify-content: flex-end; }
+  .bubble { max-width: 65%; border-radius: 7.5px; padding: 6px 7px 8px 9px; background: #fff; }
+  .wrap.end .bubble { background: #d9fdd3; }
+  .chip { display: inline-block; font-size: 12px; padding: 0 4px; }
+</style>
+</head>
+<body class="web">
+<div id="app">
+  <div class="_aigs" tabindex="-1">
+    <div class="_aigt"><header data-tab="2" role="navigation"></header></div>
+    <div class="_aigw">
+      <div id="side">
+        <header><span dir="auto" title="Chats">Chats</span></header>
+        <div contenteditable="true" role="textbox" aria-label="Search input textbox" data-tab="3"><p class="selectable-text copyable-text"><br></p></div>
+        <div id="pane-side">
+          <div aria-label="Chat list" role="grid" aria-rowcount="4">
+            <div role="row"><div><span dir="auto" title="Contact A">Contact A</span><span>10:15</span></div><div><span dir="auto" title="Bis später">Bis später</span></div></div>
+            <div role="row"><div><span dir="auto" title="Contact D">Contact D</span><span>10:02</span></div><div><span dir="auto" title="Hallo? Bist du da?">Hallo? Bist du…</span><span class="unread" aria-label="1 unread message">1</span></div></div>
+            <div role="row"><div><span dir="auto" title="Family">Family</span><span>09:58</span></div><div><span dir="auto">Zak</span><span>: </span><span dir="auto" title="Wer kommt heute?">Wer kommt heute?</span><span class="unread" aria-label="2 ungelesene Nachrichten">2</span></div></div>
+            <div role="row"><div><span dir="auto" title="Photo Friend">Photo Friend</span><span>09:40</span></div><div><span><svg viewBox="0 0 16 16" width="16" height="16"><rect width="16" height="16"/></svg></span><span dir="auto" title="Photo">Photo</span><span class="unread" aria-label="1 unread message">1</span></div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="_aigv _aig-">
+      <div id="main" class="_ajx_">
+        <header class="_amid">
+          <div class="_amie" title="Profile details" role="button"><img alt="" width="40" height="40"></div>
+          <div class="_amie title" title="Profile details" role="button">
+            <div><div><span dir="auto">Contact A</span></div></div>
+          </div>
+        </header>
+        <div class="copyable-area">
+          <div tabindex="0" class="_ajyl x1y332i5" data-testid="conversation-panel-messages">
+            <div tabindex="0" data-tab="8" class="_list">
+              <div tabindex="-1"><div class="_amjw focusable-list-item"><span dir="auto">Today</span></div></div>
+              <div role="row" tabindex="-1">
+                <div tabindex="-1" data-id="3EB0A1B2C3D4E5F60001" data-testid="conv-msg-3EB0A1B2C3D4E5F60001">
+                  <div data-virtualized="false"><div><div class="focusable-list-item">
+                    <span></span>
+                    <div data-testid="msg-container" class="wrap start"><div class="false false bubble"><span aria-label="Contact A:"></span><div><div data-pre-plain-text="[09:12, 11/11/2026] Contact A: " class="copyable-text"><div><span data-testid="selectable-text" dir="ltr" class="selectable-text copyable-text"><span>Guten Morgen!</span></span></div></div><div role="button" data-testid="msg-meta"><span dir="auto"><span>09:12</span></span></div></div></div></div>
+                    <div class="chip" data-testid="reaction-bubble">👍</div>
+                  </div></div></div>
+                </div>
+              </div>
+              <div role="row" tabindex="-1">
+                <div tabindex="-1" data-id="3EB0A1B2C3D4E5F60002" data-testid="conv-msg-3EB0A1B2C3D4E5F60002">
+                  <div data-virtualized="false"><div><div class="focusable-list-item">
+                    <span></span>
+                    <div data-testid="msg-container" class="wrap end"><div class="false false bubble"><span aria-label="Me:"></span><div><div data-pre-plain-text="[09:15, 11/11/2026] Me: " class="copyable-text"><div><span data-testid="selectable-text" dir="ltr" class="selectable-text copyable-text"><span>Gut, danke!</span></span></div></div><div role="button" data-testid="msg-meta"><span dir="auto"><span>09:15</span></span></div></div></div></div>
+                    
+                  </div></div></div>
+                </div>
+              </div>
+              <div role="row" tabindex="-1">
+                <div tabindex="-1" data-id="A5C1D2E3F4A5B6C70003" data-testid="conv-msg-A5C1D2E3F4A5B6C70003">
+                  <div data-virtualized="false"><div><div class="focusable-list-item">
+                    <span></span>
+                    <div data-testid="msg-container" class="wrap start"><div class="false false bubble"><div><img alt="" width="240" height="160" src="data:,"></div></div></div>
+                    
+                  </div></div></div>
+                </div>
+              </div>
+              <div role="row" tabindex="-1">
+                <div tabindex="-1" data-id="A5C1D2E3F4A5B6C70004" data-testid="conv-msg-A5C1D2E3F4A5B6C70004">
+                  <div data-virtualized="false"><div><div class="focusable-list-item">
+                    <span></span>
+                    <div data-testid="msg-container" class="wrap start"><div class="false false bubble"><span aria-label="Contact A:"></span><div><div data-pre-plain-text="[10:15, 11/11/2026] Contact A: " class="copyable-text"><div><span data-testid="selectable-text" dir="ltr" class="selectable-text copyable-text"><span>Bis später</span></span></div></div><div role="button" data-testid="msg-meta"><span dir="auto"><span>10:15</span></span></div></div></div></div>
+                    
+                  </div></div></div>
+                </div>
+              </div>
+              <div role="row" tabindex="-1">
+                <div tabindex="-1" data-id="3EB0A1B2C3D4E5F60005" data-testid="conv-msg-3EB0A1B2C3D4E5F60005">
+                  <div data-virtualized="false"><div><div class="focusable-list-item">
+                    <span></span>
+                    <div data-testid="msg-container" class="wrap end"><div class="false false bubble"><span aria-label="You:"></span><div><div data-pre-plain-text="[10:20, 11/11/2026] Me: " class="copyable-text"><div role="button" aria-label="Quoted message" data-testid="quoted-message"><div data-pre-plain-text="[10:15, 11/11/2026] Contact A: " class="copyable-text"><span dir="auto" class="selectable-text copyable-text quoted-mention"><span>Bis später</span></span></div></div><div><span data-testid="selectable-text" dir="ltr" class="selectable-text copyable-text"><span>Klingt gut</span></span></div></div><div role="button" data-testid="msg-meta"><span dir="auto"><span>10:20</span></span></div></div></div></div>
+                  </div></div></div>
+                </div>
+              </div>
+              <div role="row" tabindex="-1">
+                <div tabindex="-1" data-id="A5C1D2E3F4A5B6C70006" data-testid="conv-msg-A5C1D2E3F4A5B6C70006">
+                  <div data-virtualized="false"><div><div class="focusable-list-item">
+                    <span></span>
+                    <div data-testid="msg-container" class="wrap start"><div class="false false bubble"><div style="display:flex;align-items:center;gap:8px;width:260px"><button aria-label="Play voice message" style="border:0;background:none;padding:0"><span data-icon="audio-play"><svg viewBox="0 0 34 34" width="34" height="34"></svg></span></button><div role="slider" aria-valuenow="0" aria-valuemin="0" aria-valuemax="23" style="flex:1;height:20px"></div><div><span>0:23</span></div></div><div role="button" data-testid="msg-meta"><span dir="auto"><span>10:25</span></span></div></div></div>
+                  </div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <footer class="_ak1i">
+            <div contenteditable="true" role="textbox" aria-label="Type a message" data-tab="10"><p class="selectable-text copyable-text"><br></p></div>
+          </footer>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

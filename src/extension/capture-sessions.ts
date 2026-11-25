@@ -15,7 +15,9 @@ const whatsAppWeb = 'https://web.whatsapp.com/';
  * browser" bar, the tab is closed), the content script is told and every
  * later capture fails.
  */
-export function serveCaptureSessions(): void {
+export function serveCaptureSessions(): { busy(): boolean } {
+  /** Every open capture-session port: a Chat Record is being made while there is one. */
+  const openPorts = new Set<chrome.runtime.Port>();
   /** The open session's port, per tab with the debugger attached. */
   const sessions = new Map<number, chrome.runtime.Port>();
   /** Detaches still in progress, per tab; a new session waits for them. */
@@ -43,8 +45,10 @@ export function serveCaptureSessions(): void {
     if (port.name !== captureSessionPortName) return;
     const tabId = port.sender?.tab?.id;
     let open = true;
+    openPorts.add(port);
     port.onDisconnect.addListener(() => {
       open = false;
+      openPorts.delete(port);
       if (tabId !== undefined && sessions.get(tabId) === port) {
         sessions.delete(tabId);
         void detach(tabId);
@@ -112,6 +116,8 @@ export function serveCaptureSessions(): void {
       send(port, { type: 'capture-failed', id, error: errorMessage(error) });
     }
   }
+
+  return { busy: () => openPorts.size > 0 };
 }
 
 function detachReason(reason: string): string {

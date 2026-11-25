@@ -2,10 +2,26 @@ import { createChatRecorder } from '../core/chat-recorder';
 import { copyPngToClipboard } from '../extension/clipboard';
 import { createContinuationStore } from '../extension/continuation-store';
 import { downloadFile } from '../extension/download';
-import { isOpenPanelRequest } from '../extension/messages';
+import { createChatWatcher } from '../core/translation/chat-watcher';
+import { createDebugLog } from '../core/translation/debug-log';
+import { createTranslationStore, defaultSettings, settingsStorageKey } from '../core/translation/store';
+
+declare const __BUILD_ID__: string;
+import {
+  isOpenPanelRequest,
+  isToWhatsAppTab,
+  type ChatListAnswer,
+  type PreviewReport,
+  type TranslationReport,
+  type VoiceReport,
+} from '../extension/messages';
+import type { ReportAnswer } from '../core/translation/translation-bot';
+import { createAudioTap } from '../whatsapp-web/audio-probe';
 import { createDebuggerCamera } from '../extension/debugger-camera';
 import { createRecordPanel, type CreateResult } from '../ui/record-panel';
 import { keepInChatHeader } from '../whatsapp-web/chat-header';
+import { createChatsPage } from '../whatsapp-web/chats-page';
+import { diagnosePage, diagnoseVoice } from '../whatsapp-web/diagnose';
 import { createWhatsAppWebPage } from '../whatsapp-web/whatsapp-web-page';
 
 export default defineContentScript({
@@ -76,8 +92,133 @@ export default defineContentScript({
     const recorder = createChatRecorder({ page, camera });
 
     keepInChatHeader(document, panel.button);
-    chrome.runtime.onMessage.addListener((message) => {
+
+    // Auto-translation: watch the Translated Chats and send the Translation Bot's replies (see src/core/translation/).
+    const audioTap = createAudioTap(window);
+    const chats = createChatsPage(document, { audioTap });
+    const store = createTranslationStore(chrome.storage.local);
+    let settings = Promise.resolve({ enabled: false, chatNames: [] as string[] });
+    const loadSettings = () => {
+      settings = store
+        .settings()
+        .catch(() => defaultSettings)
+        .then((loaded) => ({ enabled: loaded.enabled, chatNames: loaded.chats.map((chat) => chat.name) }));
+    };
+    loadSettings();
+    const debug = createDebugLog(chrome.storage.local, 'whatsapp');
+    debug('WhatsApp Web page started', { build: __BUILD_ID__ });
+    const watcher = createChatWatcher({
+      debug,
+      page: chats,
+      settings: () => settings,
+      async report(chatName, messages) {
+        const report: TranslationReport = { type: 'translation/report', chatName, messages };
+        const answer = (await chrome.runtime.sendMessage(report)) as ({ ok?: boolean; error?: string } & ReportAnswer) | undefined;
+        if (!answer?.ok) throw new Error(`the Translation Bot did not take the messages: ${answer?.error ?? 'no answer'}`);
+        return answer.wantAudio ? { wantAudio: answer.wantAudio } : {};
+      },
+      async reportVoice(chatName, messageId, audio) {
+        const report: VoiceReport = {
+          type: 'translation/voice',
+          chatName,
+          messageId,
+          audio:
+            audio.kind === 'audio'
+              ? { base64: await toBase64(audio.audio), mimeType: audio.audio.type || 'audio/ogg', played: audio.played }
+              : { failed: audio.detail },
+        };
+        const answer = (await chrome.runtime.sendMessage(report)) as { ok?: boolean; error?: string } | undefined;
+        if (!answer?.ok) throw new Error(`the Translation Bot did not take the voice note: ${answer?.error ?? 'no answer'}`);
+      },
+      async reportPreview(chatName, preview, unreadCount) {
+        const report: PreviewReport = { type: 'translation/preview', chatName, ...preview, unreadCount };
+        const answer = (await chrome.runtime.sendMessage(report)) as { ok?: boolean; error?: string } | undefined;
+        if (!answer?.ok) throw new Error(`the Translation Bot did not take the message: ${answer?.error ?? 'no answer'}`);
+      },
+      // Switching Chats in the middle of a Chat Record would spoil it.
+      busy: () => (recording ? 'a Chat Record is being made in WhatsApp Web; send it again when it is done' : undefined),
+    });
+    watcher.start();
+    chrome.storage.onChanged.addListener((changes, area) => {
+      if (area !== 'local' || !(settingsStorageKey in changes)) return;
+      loadSettings();
+      void watcher.check();
+    });
+
+    chrome.runtime.onMessage.addListener((message: unknown, _sender, sendResponse) => {
       if (isOpenPanelRequest(message)) panel.open();
+      if (!isToWhatsAppTab(message)) return false;
+      if (message.type === 'translation/send') {
+        void watcher.send(message.chatName, message.text).then(sendResponse);
+        return true; // answered asynchronously
+      }
+      if (message.type === 'translation/diagnose-voice') {
+        void diagnoseVoice(document, chats, audioTap)
+          .then((report) => ({ build: __BUILD_ID__, ...report }))
+          .catch((error: unknown) => ({ failed: String(error) }))
+          .then(sendResponse);
+        return true; // answered asynchronously
+      }
+      if (message.type === 'translation/diagnose') {
+        void chats
+          .readMessages()
+          .then(
+            (messages) => ({
+              messagesRead: messages.length,
+              atNewest: safely(() => chats.atNewest()),
+              newestAsRead: messages.slice(-6).map((message) => ({
+                direction: message.direction,
+                sender: message.sender ? 'yes' : 'no',
+                text: message.text === undefined ? 'none' : `${message.text.length} chars`,
+              })),
+            }),
+            (error: unknown) => ({ messagesRead: `failed: ${String(error)}` }),
+          )
+          .then((adapter) =>
+            sendResponse({
+              build: __BUILD_ID__,
+              openChat: chats.openChatName() !== undefined,
+              ...adapter,
+              // What the extension reads from the first Chat list rows (by position, no names).
+              chatListAsRead: chats
+                .chatListNames()
+                .slice(0, 10)
+                .map((name, index) => {
+                  const row = chats.chatListRow(name);
+                  return {
+                    row: index + 1,
+                    unread: row?.unread ?? false,
+                    unreadCount: row?.unreadCount ?? 'none',
+                    lastMessage: row?.preview
+                      ? `${row.preview.text.length} chars${row.preview.sender ? ', with sender' : ''}`
+                      : 'not plain text (or not found): the Chat would be opened',
+                  };
+                }),
+              ...diagnosePage(document),
+            }),
+          );
+        return true; // answered asynchronously
+      }
+      const open = chats.openChatName();
+      const answer: ChatListAnswer = { names: chats.chatListNames(), ...(open ? { open } : {}) };
+      sendResponse(answer);
+      return false;
     });
   },
 });
+
+/** A blob's bytes as base64, for a runtime message (JSON only). */
+async function toBase64(blob: Blob): Promise<string> {
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(binary);
+}
+
+function safely<T>(read: () => T): T | string {
+  try {
+    return read();
+  } catch (error) {
+    return `failed: ${String(error)}`;
+  }
+}

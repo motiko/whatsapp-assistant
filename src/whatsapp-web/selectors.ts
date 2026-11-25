@@ -37,6 +37,84 @@ export const selectors = {
    * item in it (checked Nov 2026).
    */
   promptButton: 'button, [role="button"]',
+
+  /*
+   * Used by auto-translation (`chats-page.ts`). None of these is verified
+   * against the real page yet; they follow WhatsApp Web's structure as
+   * commonly described (Nov 2026).
+   */
+  /** The Chat list (it also shows search results). */
+  chatList: '#pane-side',
+  /** A row of the Chat list; the first element with a `title` in it holds the Chat's name. */
+  chatListRow: '[role="listitem"]',
+  /** Fallback when the Chat list has no `listitem` rows. */
+  chatListRowFallback: '[role="row"]',
+  chatListTitle: 'span[title]',
+  /**
+   * A Chat list row's unread badge, labelled like "3 unread messages" in
+   * English. In any language it is an element with an `aria-label` whose
+   * text is just the number, which is how `chats-page.ts` finds it.
+   */
+  unreadBadge: '[aria-label*="unread" i]',
+  /** Candidates for the unread badge in any language: labelled elements; the one whose text is a number is it. */
+  labelled: '[aria-label]',
+  /**
+   * In a Chat list row: icons. Next to the last message, one means it isn't
+   * plain text (a photo, voice note, sticker, deleted message…), so the
+   * Chat is opened to read it. Emoji `<img>`s inside the text don't count.
+   */
+  rowIcon: 'svg, img, [data-icon]',
+  /** The search box above the Chat list. */
+  chatSearch: '#side [contenteditable="true"]',
+  /**
+   * Who sent a message. WhatsApp Web used to say it in the message's
+   * `data-id` (`true_…` the user's own, `false_…` anyone else's) and with
+   * `message-out` / `message-in` classes; since Nov 2026 `data-id` holds only
+   * the message's key and the classes are gone (seen on the real page), so
+   * `chats-page.ts` falls back to which side the bubble sits on.
+   */
+  ownIdPrefix: 'true_',
+  othersIdPrefix: 'false_',
+  ownMessageClass: '.message-out',
+  othersMessageClass: '.message-in',
+  /** Inside a message: the element with `data-pre-plain-text` ("[time, date] Sender: "), around its text. */
+  messageBody: '[data-pre-plain-text]',
+  /**
+   * Inside a reply: the quote of the message it answers, which carries its
+   * own text (and may carry its own `data-pre-plain-text`). It is clickable
+   * (to jump to the quoted message), so it is a `role="button"`; older pages
+   * mark its text `quoted-mention`. Text inside it is not the reply's own.
+   */
+  quotedMessage: '[role="button"], .quoted-mention',
+  /** What a quote holds and other buttons in a message don't: a message's text (or its sender line). */
+  quotedText: '[data-pre-plain-text], .selectable-text, .quoted-mention',
+  /** Inside a message body: its text (or a photo's caption). Emoji are `<img alt="😀">`. */
+  messageText: '.selectable-text',
+  /** The open Chat's message box. */
+  messageBox: '#main footer [contenteditable="true"]',
+  /** The send button's icon, next to the message box once it holds text (older pages). */
+  sendIcon: '#main footer [data-icon*="send"]',
+  /** The send button by its label, English UI (newer pages draw the icon as a bare `<svg>`). Else Enter is pressed. */
+  sendButton: '#main footer button[aria-label="Send" i], #main footer [role="button"][aria-label="Send" i]',
+
+  /*
+   * Voice notes (`chats-page.ts`, `audio-probe.ts`). Not verified against the
+   * real page yet: "Diagnose a voice note" on the options page shows what it
+   * has, to fix these.
+   */
+  /**
+   * Inside a message: what marks it as a voice note: its play button's icon,
+   * its progress slider, or an audio element. A video has a play icon too,
+   * but no slider; it is told apart by `voiceNoteStrong`.
+   */
+  voiceNote: 'audio, [data-icon*="audio-play"], [data-icon*="ptt"], [role="slider"], [aria-label*="voice message" i]',
+  /** The marks only a voice note has (not a video's play icon). */
+  voiceNoteStrong: 'audio, [data-icon*="ptt"], [role="slider"], [aria-label*="voice message" i]',
+  /** Inside a voice note: its play button (an icon inside a button), English label as a fallback. */
+  voicePlayIcon: '[data-icon*="audio-play"], [data-icon*="play"]',
+  voicePlayButton: 'button[aria-label*="play" i], [role="button"][aria-label*="play" i]',
+  /** An audio element WhatsApp Web already gave its decrypted audio (a `blob:` URL). */
+  voiceAudioElement: 'audio[src^="blob:"], audio source[src^="blob:"]',
 } as const;
 
 /**

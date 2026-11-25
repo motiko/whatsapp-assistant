@@ -39,7 +39,15 @@ npm install
 npm run build        # writes the unpacked extension to .output/chrome-mv3
 ```
 
-`npm run dev` starts WXT's dev mode (rebuilds and reloads on change in a separate Chrome profile).
+`npm run watch` rebuilds on every change to `src/`. The unpacked extension loaded in your Chrome
+picks up each new build by itself within a few seconds: it reloads, then reloads WhatsApp Web's tabs
+so they run the new content script (never while a Chat Record is being made; it waits until that is
+done). Each build writes `build-id.txt` next to the manifest, which the running extension compares
+with its own (`src/extension/self-reload.ts`). If Chrome has put the extension's worker to sleep, it
+notices within a minute. Text typed but not sent in WhatsApp Web's message box may be lost.
+
+`npm run dev` starts WXT's dev mode instead (rebuilds and reloads on change in a separate Chrome
+profile, where you'd have to log in to WhatsApp Web again).
 
 ## Load it unpacked in Chrome
 
@@ -123,6 +131,56 @@ The bar may stay a few seconds after the run. The toolbar icon still opens the p
    Band names the two records it connects. Overlap (repeated messages) is left alone. The panel says
    when this happens, and warns if the missed messages couldn't be recorded.
 
+## Auto-translation through Telegram
+
+Chosen Chats, the **Translated Chats**, can be translated both ways through your own Telegram bot
+(see [ADR-0005](docs/adr/0005-auto-translation-through-a-telegram-bot.md)): their new messages arrive
+in Telegram in your language, under the Chat's name (the original below it if you choose). To answer, reply
+(swipe left) to a message in Telegram: it is translated into that Chat's language and sent straight
+away. A message that isn't a reply goes to the Chat that last wrote or that you last answered (with
+several Chats and neither, the bot asks you to reply instead). The bot answers with the Chat it went
+to, what was sent and a back-translation; replying to that answer goes to the same Chat.
+
+Set it up on the extension's options page (right-click the toolbar icon > **Options**, or
+`chrome://extensions` > Details > Extension options):
+
+1. **Your language**, and the **Translated Chats**: type each Chat's name as in the Chat list (or
+   click **Load Chat names from WhatsApp Web** with WhatsApp Web open, then pick from the name field),
+   choose the language its contact writes in, and click **Add**.
+2. **Translator**: Google Translate (free, no key) or an LLM through any OpenAI-compatible API with
+   your own key (OpenRouter by default). **Test translator** tries it, and for an LLM asks Chrome
+   for access to that API's site.
+3. **Telegram bot**: create one with [@BotFather](https://t.me/BotFather) (`/newbot`), paste its
+   token, click **Link my Telegram** and press Start in the bot (or send it the code shown). Only
+   that Telegram chat is obeyed. Use a bot of its own (not Kolja's): two programs reading one bot
+   take each other's messages.
+4. **Voice messages** (optional): a speech-to-text API with your own key (any OpenAI-compatible
+   `/audio/transcriptions`, OpenAI by default) and **Test transcription**, which also asks Chrome for
+   access to its site. See below.
+5. Tick **Auto-translation is on**.
+
+Keep WhatsApp Web open in a Chrome tab; it can be in the background or minimised. WhatsApp Web switches Chats only
+when it must. A single new text message in a Translated Chat is read from the Chat list, without
+opening the Chat (so it isn't marked as read). Several messages at once, or a photo or voice note,
+open the Chat, and WhatsApp Web stays there; opening a Chat may mark its messages as read. A reply
+from Telegram opens its Chat, sends, and goes back to the Chat you had open. In test mode your own
+messages are forwarded only while their Chat is open (they raise no unread count). Telegram shows only the translation of each message; tick
+**Show the original text** (under Advanced) to see the original below it. Only messages that arrive after a Chat was added
+are forwarded, never its history, and only while it shows its newest messages (not while you have
+scrolled it up). Photos and stickers are
+announced, not forwarded.
+
+**Voice notes** (see [ADR-0006](docs/adr/0006-voice-notes.md)), with a transcription service set up: a voice
+note from a Translated Chat opens its Chat, and arrives in Telegram as "🎤 Voice note 0:23 — transcribing…",
+edited into its translation a few seconds later. If its audio isn't in the page yet, the extension presses play,
+silently, and stops it again; the contact then sees it as played. Untick **Play voice notes…** to never do
+that (such voice notes are then only announced). Tick **Also send the original voice note** to get the
+recording in Telegram too. A voice note you send to the bot is transcribed in your language and sent to
+the Chat as translated text; the bot's answer starts with what it heard. Voice notes over 5 minutes are
+not transcribed. Without a transcription service, voice notes are only announced. A reply isn't sent while a Chat Record is being made, or if WhatsApp Web's message box
+already holds something you typed; the bot says why. In Telegram, `/pause` and `/resume` turn it
+off and on, `/status` shows the settings.
+
 ## Tests
 
 ```sh
@@ -161,6 +219,13 @@ Tests sit at two seams (see the spec's Testing Decisions in
   chat area that moves or changes size part-way ends it as a Partial Chat Record. The real Camera
   (`src/extension/debugger-camera.ts`, `capture-sessions.ts`) talks to `chrome.debugger` and has no
   automated tests; it is covered by the background-capture smoke checklist below.
+- **Auto-translation** (`src/core/translation/*.test.ts`): the Translation Bot (pairing, replies and
+  which Chat they go to, forwarding each new message once, history never forwarded, settings from
+  before several Chats) with fake Telegram, translator and WhatsApp; the Chat Watcher (when it
+  switches Chats, also among several, never while a Chat Record runs, sends in order)
+  with a scripted Chats Page; which messages count as new; the translators against canned answers.
+  The real Telegram and translator calls, the background poll loop and the options page have no
+  automated tests; see the auto-translation smoke checklist below.
 - **WhatsApp Web adapter** (`src/whatsapp-web/*.test.ts`): run against page snapshots in
   `src/whatsapp-web/fixtures/`, rendered in a real 1280x800 frame (also one that runs no animation frames, as in a background
   tab). **These snapshots are currently
@@ -179,29 +244,41 @@ Tests sit at two seams (see the spec's Testing Decisions in
 | `src/core/day-span.ts` | Local days (ISO `YYYY-MM-DD`) and the span of days a Chat Record covers |
 | `src/core/whatsapp-page.ts` | **WhatsApp Page** interface (Chat name, chat area, scroll position/height, scrolling, loaded date dividers and messages, expanding "Read more" within a span, loading older messages or saying there are none) and `PageNotRecognisedError` |
 | `src/core/camera.ts` | **Camera** interface (start/stop once per Chat Record; viewport bitmap + device pixel ratio) and `CaptureNotAllowedError` |
-| `src/whatsapp-web/` | **WhatsApp Web adapter**: the only code that knows WhatsApp Web's page. All selectors are in `selectors.ts`; reading divider labels ("Today", weekdays, locale dates) is in `divider-dates.ts`. |
-| `src/extension/` | Chrome-side pieces: the debugger Camera (`debugger-camera.ts`, hides own UI) and the background worker's capture sessions (`capture-sessions.ts`: attach, focus emulation, `Page.captureScreenshot`, detach), clipboard and download output, messages to the background worker, pending Continuations in session storage (`continuation-store.ts`) |
+| `src/core/translation/` | **Auto-translation**: the Translation Bot (`translation-bot.ts`: pairing, commands, replies, forwarding), the Chat Watcher (`chat-watcher.ts`) and its **Chats Page** interface, which messages are new (`new-messages.ts`), the translators (Google, LLM), a Telegram Bot API client, settings and bot state (`store.ts`). No Chrome or WhatsApp knowledge. |
+| `src/whatsapp-web/` | **WhatsApp Web adapter**: the only code that knows WhatsApp Web's page. All selectors are in `selectors.ts`; reading divider labels ("Today", weekdays, locale dates) is in `divider-dates.ts`; the Chat list, reading messages and the message box for auto-translation are in `chats-page.ts`. |
+| `src/extension/` | Chrome-side pieces: the debugger Camera (`debugger-camera.ts`, hides own UI) and the background worker's capture sessions (`capture-sessions.ts`: attach, focus emulation, `Page.captureScreenshot`, detach), clipboard and download output, messages to the background worker, pending Continuations in session storage (`continuation-store.ts`), and auto-translation's background side (`translation-service.ts`: Telegram polling, reaching the WhatsApp Web tab) |
 | `src/ui/record-panel.ts` | Header button and panel, including progress, Cancel and the lock over WhatsApp Web while recording |
 | `src/ui/date-range-fields.ts` | The panel's From/To pickers, presets (including Full Chat) and validation |
-| `src/entrypoints/` | WXT entry points: content script (wiring) and background worker (capture sessions, toolbar icon) |
+| `src/entrypoints/` | WXT entry points: content script (wiring), background worker (capture sessions, toolbar icon, auto-translation) and the options page (auto-translation settings) |
 
 ## Permissions and privacy
 
-- `host_permissions`: `https://web.whatsapp.com/*` only.
+- `host_permissions`: `https://web.whatsapp.com/*`; `https://api.telegram.org/*` and
+  `https://translate.googleapis.com/*` for auto-translation.
+- `optional_host_permissions`: `https://*/*`, of which the options page asks for just the LLM API's
+  site (only if you choose an LLM translator) and the transcription API's site (only if you set one up).
+- A second content script runs in WhatsApp Web's own page world (the Audio Probe), to get voice notes'
+  audio; it reads only audio the page made and sends nothing anywhere itself.
+- `alarms`: restarts the Telegram bot's polling every minute after Chrome stopped the background worker.
 - `debugger`: captures the WhatsApp Web tab with `Page.captureScreenshot`, also in the background, and
   keeps it rendering meanwhile (see above and [ADR-0004](docs/adr/0004-capture-with-the-debugger.md)).
   It is attached only to the WhatsApp Web tab that started a Chat Record, only while it runs. Chrome
   warns that it gives access to the page debugger backend and all websites' data.
 - `clipboardWrite`: lets the content script put the PNG on the clipboard.
 - `storage`: `chrome.storage.session`, for pending Continuations (below). The background worker
-  lets the content script use it (`setAccessLevel`).
+  lets the content script use it (`setAccessLevel`). `chrome.storage.local` for the auto-translation
+  settings (including the bot token and LLM key, in the clear) and the bot's state.
 - No `downloads` permission: **Download** clicks a download link from the content script, which needs
   none. The cost is that the extension can't see where Chrome saved the file, so the confirmation
   names the file and your Downloads folder (if Chrome is set to ask where to save, it is wherever you
   chose).
 
-The extension makes no network requests and stores no message content or images; Chat Records exist
-only on your clipboard and in files you download. The panel keeps the last Chat Record in memory only
+Chat Records make no network requests, and no message content or images are stored; Chat Records
+exist only on your clipboard and in files you download. Auto-translation, when on, sends the
+Translated Chat's new incoming messages and your replies (text only, with the sender's name in a
+group) to Telegram and to the translator you chose (Google, or your LLM provider), and, with a
+transcription service set up, their voice notes and yours to that service (and to Telegram, if you
+chose to forward the recordings); nothing from other Chats. It stores the ids of the Translated Chat's messages it has handled (not their text). The panel keeps the last Chat Record in memory only
 while it offers to download it. The one thing it keeps is where each Partial Chat Record stopped, so
 it can offer **Continue**: per Chat, the Chat's name, the request (From and To days, or Full Chat),
 WhatsApp's id of the last message captured with its day and time, the failure reason and the partial
@@ -387,3 +464,32 @@ Band show only the day.
 - [ ] A long PDF record finished while you are in another tab still downloads.
 - [ ] Screen joins show no thin line across the image (a 1px line at the joins was seen with the synthetic
       fixture in Chromium; check whether real WhatsApp Web does it too).
+
+## Manual smoke checklist (auto-translation)
+
+Needs a logged-in WhatsApp Web, a Telegram bot and a second WhatsApp account (or a friend) to write in the Translated Chat.
+Without one, tick **Test mode** on the options page and add your "Message yourself" Chat: your own messages there are then
+forwarded too (marked "you (test mode)"), while what the bot sends from Telegram is never forwarded back.
+
+- [ ] Options page: **Load Chat names from WhatsApp Web** fills the name field's suggestions; add two Chats with different languages. **Test translator** shows a translation.
+- [ ] Paste the bot token: "Bot @… found". **Link my Telegram**, press Start in the bot: it answers "Linked", and the page says linked.
+- [ ] Sending the code from a second Telegram account before that links nothing; five wrong messages void the code.
+- [ ] Tick **Auto-translation is on** with the Translated Chat open: its existing messages are not forwarded.
+- [ ] A new message in it arrives in Telegram within seconds, translated, with the original below.
+- [ ] Open another Chat; a new message in the Translated Chat switches WhatsApp Web to it and arrives in Telegram. Also with the WhatsApp tab in the background for 10+ minutes, and in a minimised window.
+- [ ] With news in both Translated Chats at once, WhatsApp Web opens one, then the other, and both arrive in Telegram under their names. It doesn't keep switching between them afterwards.
+- [ ] Swipe-reply to a message from each: each reply goes to its own Chat in its language. A plain message goes to the Chat you last answered (or that last wrote); the bot's answer names it.
+- [ ] Write to the bot: WhatsApp Web switches to the Translated Chat, the translation appears there as your message, and the bot answers "Sent" with a back-translation. Several messages quickly arrive in order. A multi-line message keeps its lines.
+- [ ] Type something in the Translated Chat's message box without sending, then write to the bot: it is not sent, and the bot says why.
+- [ ] Start a long Chat Record, then write to the bot: not sent ("a Chat Record is being made"), and the Chat Record is unharmed.
+- [ ] A photo and a long message with "Read more" from the contact: the photo is announced, the long one arrives in full.
+- [ ] A group as a Translated Chat: forwarded messages name their sender.
+- [ ] Voice messages: set up transcription; **Test transcription** says it works.
+- [ ] Open a Chat with a voice note you don't mind marking as played; **Diagnose a voice note** shows `result.kind: "audio"` (if not, send the diagnosis to fix the voice selectors).
+- [ ] A voice note from the contact: Telegram shows "transcribing…", then its translation. You don't hear it play. With **Play voice notes…** off, a voice note never played before is only announced.
+- [ ] With **Also send the original voice note** on, the recording follows in Telegram; swipe-replying to it goes to its Chat.
+- [ ] Send the bot a voice note: the contact gets the translated text; the bot's answer starts with what it heard. Without a transcription service, the bot says where to set one up.
+- [ ] `/pause` stops both ways (the options page shows it off), `/resume` starts again.
+- [ ] Close WhatsApp Web and write to the bot: "WhatsApp Web is not open in Chrome".
+- [ ] If anything fails to switch, read or send, fix the selectors in `src/whatsapp-web/selectors.ts` (the auto-translation ones are unverified) and add a scrubbed real snapshot.
+

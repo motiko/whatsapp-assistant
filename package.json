@@ -11,10 +11,12 @@
     "compile": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "watch": "node scripts/watch.mjs",
     "postinstall": "wxt prepare"
   },
   "devDependencies": {
     "@types/chrome": "^0.3.7",
+    "@types/node": "^24.19.2",
     "@vitest/browser-playwright": "^5.1.0",
     "playwright": "1.64.1",
     "typescript": "5.9.3",

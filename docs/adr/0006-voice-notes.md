@@ -1,0 +1,18 @@
+# Voice notes are transcribed, then translated; WhatsApp Web's are played silently when that is the only way to their audio
+
+Voice notes are common in the Translated Chats, and the user wants to send them too. Until now, a voice note from a Translated Chat was only announced in Telegram, and a voice note sent to the bot was refused.
+
+Decisions, as the user chose them:
+
+- **Transcribe, then translate with the configured translator.** Speech-to-text goes through any OpenAI-compatible `/audio/transcriptions` API (OpenAI by default, `gpt-4o-mini-transcribe`) with the user's own key, configured apart from the LLM translator: providers like OpenRouter that serve chat models don't serve transcription. The transcript then goes through the same translator as text, so Google or the LLM, tone and "show the original" all behave as for text. Rejected: Whisper's `translations` endpoint (only into English); a local Whisper model in the browser (free and private, but a large download and weaker on small models; it may come later).
+- **Both ways.** A WhatsApp voice note arrives in Telegram as a status message at once ("🎤 Voice note 0:23 — transcribing…"), edited into its translation when its audio has been transcribed. A voice note sent to the bot is transcribed in the user's language, then sent like a text reply: as **text**, translated into the Chat's language. The bot's answer starts with what it heard, so a mishearing is seen at once. Sending translated speech (text-to-speech recorded into WhatsApp) was not wanted.
+- **WhatsApp Web's audio comes from the page itself.** WhatsApp Web downloads and decrypts a voice note in the page and plays it from a `blob:` URL; the content script's isolated world can't see the page's objects. So a second content script runs in the page's world from document start (the Audio Probe, `src/whatsapp-web/audio-probe.ts`). It notes the audio blobs the page makes (`URL.createObjectURL`) and what media it plays, and hands a blob over on request through `window.postMessage`. When the voice note's bubble already holds an `<audio>` with a `blob:` source, that is used. Otherwise, **if the user allows it (on by default), the extension presses play**: plays started while it waits are muted, and stopped and rewound once the audio is had. The audio then goes to the background as base64 (runtime messages carry JSON only), and from there to the transcription service. Rejected: reading WhatsApp Web's internal modules (no stable interface); downloading the media from WhatsApp's servers ourselves (it is end-to-end encrypted, and the keys live in the page).
+- **The original audio goes to Telegram only if the user turns that on** (off by default), sent as a voice note under its translation; replying to it goes to its Chat.
+
+Accepted costs:
+
+- **Played voice notes show as played.** Pressing play marks a voice note as played for the contact (blue microphone), though the user hasn't heard it. The setting turns playing off; then a voice note without audio in its bubble is only announced.
+- **Audio leaves the computer**: to the transcription service, and to Telegram if forwarding is on.
+- **The page can answer for the probe.** Any script in WhatsApp Web can post the probe's messages, so the page could hand over other audio. The page is WhatsApp Web itself, which holds that audio anyway; only other origins' messages are ignored.
+- **Unverified.** How the real page holds a voice note's audio, and how its bubble is marked (`voiceNote` selectors), are guessed; "Diagnose a voice note" on the options page plays the open Chat's last voice note and reports, masked, what happened, to fix them.
+- **Limits.** Voice notes longer than 5 minutes (or over 20 MB) are not transcribed.

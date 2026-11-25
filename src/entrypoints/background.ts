@@ -1,10 +1,13 @@
 import { serveCaptureSessions } from '../extension/capture-sessions';
 import type { OpenPanelRequest } from '../extension/messages';
+import { serveSelfReload } from '../extension/self-reload';
+import { serveTranslation } from '../extension/translation-service';
 
 /**
- * The background worker does the one thing a content script cannot:
- * capture the tab (through Chrome's debugger, see docs/adr/0004). It never
- * stores or sends what it captures.
+ * The background worker captures the tab for Chat Records (through Chrome's
+ * debugger, see docs/adr/0004); it never stores or sends what it captures.
+ * It also runs auto-translation's Telegram bot (see docs/adr/0005), which
+ * sends the Translated Chat's new messages, and only those, to Telegram.
  */
 export default defineBackground(() => {
   // Let the content script keep pending Continuations (ids and dates only) in
@@ -15,7 +18,10 @@ export default defineBackground(() => {
   chrome.runtime.onStartup.addListener(shareSessionStorage);
   chrome.runtime.onInstalled.addListener(shareSessionStorage);
 
-  serveCaptureSessions();
+  const captureSessions = serveCaptureSessions();
+  serveTranslation();
+  // New builds load on their own (unpacked only); never during a Chat Record.
+  serveSelfReload({ busy: captureSessions.busy });
 
   // Clicking the toolbar icon opens the panel (a shortcut; the header button does too).
   chrome.action.onClicked.addListener((tab) => {

@@ -1,6 +1,6 @@
 # WhatsApp Assistant
 
-A personal Chrome extension that works on top of WhatsApp Web. Its first job is producing screenshots of chats to keep as a record of what was said.
+A personal Chrome extension that works on top of WhatsApp Web. Its first job is producing screenshots of chats to keep as a record of what was said; its second is translating one Chat both ways through a Telegram bot.
 
 ## Language
 
@@ -35,3 +35,23 @@ _Avoid_: Resume, retry, restart
 **Gap Record**:
 A separate Chat Record of the messages missed between a Partial Chat Record and its Continuation, made only when the two don't join up.
 _Avoid_: Fill, patch
+
+**Translated Chat**:
+A Chat the user chose for auto-translation, with the language its contact writes in: its new incoming messages are translated and sent to the Translation Bot, and the user's replies to them are translated into that language and sent to it. There can be several.
+_Avoid_: Target chat, watched chat
+
+**Translation Bot**:
+The user's own Telegram bot, and the Telegram chat linked to it, through which the user reads the Translated Chat's messages in their language and answers them.
+_Avoid_: Telegram chat (ambiguous with a WhatsApp Chat), relay
+
+**Transcriber**:
+The speech-to-text service, with the user's own key, that turns voice notes into text before they are translated: a Translated Chat's voice notes for the user, and the user's voice notes to the Translation Bot for the Chat.
+_Avoid_: Speech recogniser, STT (in prose)
+
+**Audio Probe**:
+The small part of the extension that runs in WhatsApp Web's own page world and hands the Chat Watcher a voice note's audio.
+_Avoid_: Hook, injector
+
+**Chat Watcher**:
+The part of the extension in WhatsApp Web that notices new messages in the Translated Chats, switching WhatsApp Web to one when its Chat list row shows something new, and types the Translation Bot's replies into them.
+_Avoid_: Listener, observer

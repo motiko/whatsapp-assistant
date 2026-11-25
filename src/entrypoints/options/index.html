@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="manifest.open_in_tab" content="true" />
+    <title>WhatsApp Assistant: Translation</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <main>
+      <h1>Auto-translation</h1>
+      <p class="lead">
+        New messages in the WhatsApp Chats you choose, the <b>Translated Chats</b>, are translated into your language
+        and sent to your Telegram bot. To answer, reply (swipe left) to a message in Telegram: it is translated into
+        that Chat's language and sent straight away. WhatsApp Web must stay open in a Chrome tab (it can be in the
+        background); it switches to a Translated Chat when a message comes in or a reply goes out.
+      </p>
+
+      <section class="card" id="status-card">
+        <label class="switch">
+          <input type="checkbox" id="enabled" />
+          <span>Auto-translation is <b id="enabled-word">off</b></span>
+        </label>
+        <p class="note" id="enable-problem" hidden></p>
+        <p class="note" id="bot-status"></p>
+      </section>
+
+      <section class="card">
+        <h2>1. Languages and Chats</h2>
+        <div class="field">
+          <label for="my-language">Your language</label>
+          <select id="my-language" class="language"></select>
+          <p class="hint">Incoming messages are translated into it; you write to the bot in it.</p>
+        </div>
+        <div class="field">
+          <label for="new-chat">Translated Chats</label>
+          <ul id="chat-list" class="chat-list"></ul>
+          <p class="hint" id="no-chats">None yet. Add a Chat below.</p>
+          <div class="row add-chat">
+            <input id="new-chat" list="chat-names" placeholder="The Chat's name, as in WhatsApp Web's Chat list" />
+            <select id="new-chat-language" class="language" aria-label="The contact's language"></select>
+            <button type="button" id="add-chat">Add</button>
+          </div>
+          <datalist id="chat-names"></datalist>
+          <p class="hint">
+            Pick the language each contact writes in: your replies are translated into it.
+            <button type="button" id="load-chats" class="link">Load Chat names from WhatsApp Web</button>
+          </p>
+          <p class="note" id="chats-hint"></p>
+        </div>
+        <details class="advanced">
+          <summary>Advanced</summary>
+          <label class="choice">
+            <input type="checkbox" id="show-original" />
+            Show the original text below the translation
+          </label>
+          <p class="hint">In Telegram, under each forwarded message. Off: Telegram shows only the translation.</p>
+          <label class="choice">
+            <input type="checkbox" id="forward-own" />
+            Test mode: also forward my own messages
+          </label>
+          <p class="hint">
+            To try it with WhatsApp's “Message yourself” Chat (add it above), whose messages are all your own. Messages
+            sent from Telegram are still never forwarded back. Turn it off for real Chats.
+          </p>
+        </details>
+      </section>
+
+      <section class="card">
+        <h2>2. Translator</h2>
+        <label class="choice"><input type="radio" name="translator" value="google" /> Google Translate (free, no key)</label>
+        <label class="choice"><input type="radio" name="translator" value="llm" /> An LLM with your own API key (better with tone and slang)</label>
+        <div id="llm-fields" hidden>
+          <div class="field">
+            <label for="llm-base-url">API base URL (OpenAI-compatible)</label>
+            <input id="llm-base-url" autocomplete="off" placeholder="Type a provider, e.g. openrouter" />
+          </div>
+          <div class="field">
+            <label for="llm-model">Model</label>
+            <input id="llm-model" autocomplete="off" placeholder="anthropic/claude-haiku-5.5" />
+            <p class="note" id="llm-models-note"></p>
+          </div>
+          <div class="field">
+            <label for="llm-api-key">API key</label>
+            <input id="llm-api-key" type="password" autocomplete="off" />
+          </div>
+        </div>
+        <div class="row">
+          <button type="button" id="test-translator">Test translator</button>
+          <span class="note" id="test-result"></span>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>3. Telegram bot</h2>
+        <p class="hint">
+          Create a bot with <a href="https://t.me/BotFather" target="_blank" rel="noreferrer">@BotFather</a> (send it
+          <code>/newbot</code>) and paste its token here. Use a bot of its own: two programs reading one bot take each
+          other's messages.
+        </p>
+        <div class="field">
+          <label for="telegram-token">Bot token</label>
+          <div class="row">
+            <input id="telegram-token" type="password" autocomplete="off" placeholder="123456789:AA…" />
+            <button type="button" id="check-token">Check</button>
+          </div>
+          <p class="note" id="token-result"></p>
+        </div>
+        <div class="field">
+          <label>Your Telegram chat</label>
+          <p class="note" id="link-state"></p>
+          <div class="row">
+            <button type="button" id="link">Link my Telegram</button>
+            <button type="button" id="unlink" hidden>Unlink</button>
+          </div>
+          <div id="pairing" hidden>
+            <p>
+              Open <a id="pairing-link" target="_blank" rel="noreferrer">your bot</a> in Telegram and press
+              <b>Start</b>, or send it this code within 10 minutes:
+            </p>
+            <p class="code" id="pairing-code"></p>
+          </div>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>4. Voice messages</h2>
+        <p class="hint">
+          Voice notes are turned into text by a speech-to-text service with your own API key (OpenAI-compatible, such as
+          OpenAI or Groq), then translated like any message. Both ways: voice notes from a Translated Chat arrive in
+          Telegram as text, and voice notes you send the bot reach the Chat as translated text. Without a key, voice
+          notes are only announced. The audio goes to that service.
+        </p>
+        <div class="field">
+          <label for="stt-base-url">API base URL (OpenAI-compatible)</label>
+          <input id="stt-base-url" autocomplete="off" placeholder="Type a provider, e.g. openrouter" />
+        </div>
+        <div class="field">
+          <label for="stt-model">Model</label>
+          <input id="stt-model" autocomplete="off" placeholder="gpt-4o-mini-transcribe" />
+          <p class="note" id="stt-models-note"></p>
+        </div>
+        <div class="field">
+          <label for="stt-api-key">API key</label>
+          <input id="stt-api-key" type="password" autocomplete="off" />
+        </div>
+        <div class="row">
+          <button type="button" id="test-transcriber">Test transcription</button>
+          <span class="note" id="stt-result"></span>
+        </div>
+        <label class="choice">
+          <input type="checkbox" id="voice-play" />
+          Play voice notes when that is the only way to get their audio (silently). The contact sees them as played.
+        </label>
+        <label class="choice">
+          <input type="checkbox" id="voice-forward" />
+          Also send the original voice note to Telegram, below its translation
+        </label>
+      </section>
+      <section class="card">
+        <h2>Debug log</h2>
+        <p class="hint">
+          What auto-translation did, newest last: from WhatsApp Web (<code>[whatsapp]</code>) and the Telegram bot
+          (<code>[bot]</code>). It holds Chat names and masked message ids, never message text.
+        </p>
+        <div class="row">
+          <button type="button" id="copy-log">Copy</button>
+          <button type="button" id="clear-log" class="link">Clear</button>
+          <span class="note" id="log-note"></span>
+        </div>
+        <pre id="debug-log"></pre>
+        <p class="hint">
+          If messages aren't picked up, open a Chat with some messages in WhatsApp Web, then click
+          <b>Diagnose WhatsApp Web</b> and send the result to whoever maintains this extension. It shows how the page is
+          built, with every letter masked as <code>x</code> and every digit as <code>9</code>.
+        </p>
+        <p class="hint">
+          If voice notes aren't translated, open a Chat whose last voice note you don't mind being marked as played,
+          then click <b>Diagnose a voice note</b>: it plays that voice note (silently) the way auto-translation would and
+          shows, masked the same way, how its audio came.
+        </p>
+        <div class="row">
+          <button type="button" id="diagnose">Diagnose WhatsApp Web</button>
+          <button type="button" id="diagnose-voice">Diagnose a voice note</button>
+          <button type="button" id="copy-diagnosis" class="link" hidden>Copy</button>
+          <span class="note" id="diagnosis-note"></span>
+        </div>
+        <pre id="diagnosis" hidden></pre>
+      </section>
+    </main>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

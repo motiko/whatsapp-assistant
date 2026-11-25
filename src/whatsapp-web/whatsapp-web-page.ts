@@ -215,7 +215,7 @@ function nextFrame(view: Window): Promise<void> {
  * generated class name, so it is found as the tallest scrolling element in
  * the conversation pane (the message box can scroll too, but is short).
  */
-function messageScroller(doc: Document): HTMLElement {
+export function messageScroller(doc: Document): HTMLElement {
   const pane = find(doc, selectors.conversationPane, 'the conversation pane');
   const view = doc.defaultView!;
   let tallest: HTMLElement | undefined;

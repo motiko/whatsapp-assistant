@@ -1,0 +1,172 @@
+:root {
+  --bg: #f0f2f5;
+  --card: #ffffff;
+  --ink: #111b21;
+  --muted: #54656f;
+  --line: #d1d7db;
+  --accent: #008069;
+  --accent-ink: #ffffff;
+  --warn: #b45309;
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0b141a;
+    --card: #111b21;
+    --ink: #e9edef;
+    --muted: #8696a0;
+    --line: #2a3942;
+    --accent: #00a884;
+    --accent-ink: #0b141a;
+    --warn: #f59e0b;
+    color-scheme: dark;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font: 14px/1.5 system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+}
+
+main { max-width: 640px; margin: 0 auto; padding: 32px 16px 64px; }
+h1 { font-size: 22px; margin: 0 0 8px; }
+h2 { font-size: 16px; margin: 0 0 12px; }
+.lead { color: var(--muted); margin: 0 0 20px; }
+a { color: var(--accent); }
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 16px 18px;
+  margin-bottom: 16px;
+}
+
+.field { margin-bottom: 14px; }
+.field > label { display: block; font-weight: 600; margin-bottom: 4px; }
+.hint, .note { color: var(--muted); font-size: 13px; margin: 4px 0 0; }
+.note.warn { color: var(--warn); }
+.note.ok { color: var(--accent); }
+
+.row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.row input { flex: 1; min-width: 200px; }
+
+input:not([type="checkbox"], [type="radio"]), select {
+  width: 100%;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--card);
+  color: var(--ink);
+  font: inherit;
+}
+.row input:not([type="checkbox"], [type="radio"]) { width: auto; }
+
+button {
+  padding: 7px 14px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+button:disabled { opacity: 0.5; cursor: default; }
+#unlink { background: transparent; color: var(--accent); }
+
+.switch, .choice { display: flex; gap: 8px; align-items: center; cursor: pointer; }
+.switch { font-size: 16px; }
+.choice { margin-bottom: 6px; }
+.switch input { width: 18px; height: 18px; accent-color: var(--accent); }
+.choice input { accent-color: var(--accent); }
+
+#llm-fields { margin: 12px 0 0 24px; }
+
+.code {
+  font: 600 28px/1 ui-monospace, Menlo, monospace;
+  letter-spacing: 6px;
+  margin: 8px 0 0;
+}
+.card > .hint { margin-bottom: 12px; }
+
+.chat-list { list-style: none; margin: 0 0 8px; padding: 0; }
+.chat-list li { display: flex; gap: 8px; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--line); }
+.chat-list .name { flex: 1; min-width: 0; font-weight: 600; overflow-wrap: anywhere; }
+.chat-list select, .add-chat select { width: auto; flex: none; }
+button.link, button.remove { background: transparent; color: var(--accent); border-color: transparent; padding: 2px 4px; font-weight: 600; }
+button.remove { color: var(--muted); }
+
+#debug-log, #diagnosis {
+  margin: 12px 0 0;
+  max-height: 360px;
+  overflow: auto;
+  padding: 10px;
+  border-radius: 6px;
+  background: var(--bg);
+  font: 12px/1.5 ui-monospace, Menlo, monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.advanced { margin-top: 8px; border-top: 1px solid var(--line); padding-top: 10px; }
+.advanced summary { cursor: pointer; color: var(--muted); font-weight: 600; margin-bottom: 8px; }
+.advanced[open] summary { margin-bottom: 12px; }
+
+.combo { position: relative; }
+.combo-list {
+  position: absolute;
+  z-index: 10;
+  left: 0;
+  right: 0;
+  top: calc(100% + 2px);
+  max-height: 280px;
+  overflow-y: auto;
+  margin: 0;
+  padding: 4px 0;
+  list-style: none;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 6px 20px rgb(0 0 0 / 0.18);
+}
+.combo-list li { padding: 6px 12px; cursor: pointer; display: flex; flex-direction: column; }
+.combo-list li.active, .combo-list li[role="option"]:hover { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.combo-label { font-weight: 600; }
+.combo-value { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.combo-list li:not(:has(.combo-label)) .combo-value { color: var(--ink); font-size: 14px; }
+.combo-more { color: var(--muted); font-size: 12px; cursor: default; }
+.combo-list li[role="option"] { display: grid; grid-template-columns: 1fr auto; column-gap: 12px; }
+.combo-list li[role="option"] > :not(.combo-detail) { grid-column: 1; }
+.combo-detail { grid-column: 2; grid-row: 1 / span 2; align-self: center; color: var(--muted); font-size: 12px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+
+.model-browser {
+  width: min(760px, calc(100vw - 32px));
+  max-height: calc(100vh - 48px);
+  padding: 16px 18px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--card);
+  color: var(--ink);
+  flex-direction: column;
+  gap: 8px;
+}
+.model-browser[open] { display: flex; }
+.model-browser::backdrop { background: rgb(0 0 0 / 0.45); }
+.browser-head { display: flex; justify-content: space-between; align-items: center; }
+.browser-head h2 { margin: 0; }
+.browser-table { overflow: auto; min-height: 0; flex: 1; border-top: 1px solid var(--line); }
+.browser-table table { width: 100%; border-collapse: collapse; }
+.browser-table th { position: sticky; top: 0; background: var(--card); text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+.browser-table th button { padding: 0; color: var(--ink); white-space: nowrap; }
+.browser-table td { padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+.browser-table td.name { display: flex; flex-direction: column; }
+.browser-table td:not(.name), .browser-table th:not(.name) { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.browser-table tbody tr { cursor: pointer; }
+.browser-table tbody tr:hover, .browser-table tbody tr:focus { background: color-mix(in srgb, var(--accent) 14%, transparent); outline: none; }
+.browser-table tr.current { box-shadow: inset 3px 0 0 var(--accent); }
