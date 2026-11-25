@@ -69,6 +69,17 @@ export interface VoiceReport {
   audio: { base64: string; mimeType: string; played: boolean } | { failed: string };
 }
 
+/**
+ * WhatsApp Web content script → background: whether the open Chat is the
+ * Translated Chat of that name (shows a message known from it); answered
+ * `{ ok: true, same: boolean }`.
+ */
+export interface SameChatRequest {
+  type: 'translation/same-chat';
+  chatName: string;
+  loadedIds: string[];
+}
+
 /** Options page → background: start linking a Telegram chat; answered with the `Pairing`. */
 export interface StartPairingRequest {
   type: 'translation/start-pairing';
@@ -98,7 +109,7 @@ export interface ChatListAnswer {
   open?: string;
 }
 
-export type ToBackground = TranslationReport | PreviewReport | VoiceReport | StartPairingRequest | WakeBotRequest;
+export type ToBackground = TranslationReport | PreviewReport | VoiceReport | SameChatRequest | StartPairingRequest | WakeBotRequest;
 /** Options page → WhatsApp Web content script: answered with `diagnosePage`'s masked report. */
 export interface DiagnoseRequest {
   type: 'translation/diagnose';
@@ -111,7 +122,7 @@ export interface DiagnoseVoiceRequest {
 
 export type ToWhatsAppTab = SendToChatRequest | ChatListRequest | DiagnoseRequest | DiagnoseVoiceRequest;
 
-const translationTypes = ['translation/report', 'translation/preview', 'translation/voice', 'translation/start-pairing', 'translation/wake'];
+const translationTypes = ['translation/report', 'translation/preview', 'translation/voice', 'translation/same-chat', 'translation/start-pairing', 'translation/wake'];
 const whatsAppTabTypes = ['translation/send', 'translation/chat-list', 'translation/diagnose', 'translation/diagnose-voice'];
 
 export function isToBackground(message: unknown): message is ToBackground {

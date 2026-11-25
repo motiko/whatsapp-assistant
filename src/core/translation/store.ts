@@ -121,6 +121,9 @@ export interface TranslationStore {
   pendingVoice(chatName: string, messageId: string): Promise<PendingVoice | undefined>;
   /** Remembers a voice note's status message, or (`undefined`) forgets it. */
   setPendingVoice(chatName: string, messageId: string, pending: PendingVoice | undefined): Promise<void>;
+  /** Whether the user was told that a Chat of this name shows none of its known messages (told once, until it does again). */
+  mismatchTold(chatName: string): Promise<boolean>;
+  setMismatchTold(chatName: string, told: boolean): Promise<void>;
 }
 
 /** A voice note's Telegram status message, to be edited into its translation once its audio comes. */
@@ -144,6 +147,7 @@ const keys = {
   lastChat: 'translation.lastChat',
   listForwarded: 'translation.listForwarded',
   pendingVoice: 'translation.pendingVoice',
+  mismatchTold: 'translation.mismatchTold',
 } as const;
 
 /** The storage key of the settings, to watch for changes with `chrome.storage.onChanged`. */
@@ -182,6 +186,15 @@ export function createTranslationStore(area: StorageArea): TranslationStore {
     async setSeen(chatName, ids) {
       const all = readSeen(await read(keys.seen));
       await area.set({ [keys.seen]: { ...all, [chatName]: ids.slice(-maxSeenIds) } });
+    },
+    async mismatchTold(chatName) {
+      const told = await read(keys.mismatchTold);
+      return Array.isArray(told) && told.includes(chatName);
+    },
+    async setMismatchTold(chatName, told) {
+      const stored = await read(keys.mismatchTold);
+      const others = (Array.isArray(stored) ? stored : []).filter((name): name is string => typeof name === 'string' && name !== chatName);
+      await area.set({ [keys.mismatchTold]: told ? [...others, chatName] : others });
     },
     async chatOfMessage(messageId) {
       const name = readRecord(await read(keys.links))[String(messageId)];

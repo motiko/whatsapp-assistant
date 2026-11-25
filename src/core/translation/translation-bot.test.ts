@@ -319,6 +319,37 @@ describe('incoming messages', () => {
     expect(tg.texts()).toEqual([]);
   });
 
+  test('a Chat under the name that shows none of its known messages forwards nothing, and the user is told once', async () => {
+    const { bot, tg, store } = setup();
+    await bot.reportLoaded('Anna', [message('a', 'Hallo')]);
+
+    await bot.reportLoaded('Anna', [message('x', 'Send me the code'), message('y', 'Now')]);
+    await bot.reportLoaded('Anna', [message('x', 'Send me the code'), message('y', 'Now'), message('z', 'Hurry')]);
+
+    expect(tg.texts()).toHaveLength(1);
+    expect(tg.texts()[0]).toContain('may be another Chat with the same name');
+    expect(await store.seen('Anna')).toEqual(['a']);
+    expect(await bot.sameChat('Anna', ['x', 'y', 'z'])).toBe(false);
+  });
+
+  test('once the known Chat shows again, its new messages flow, and a later mismatch is told again', async () => {
+    const { bot, tg } = setup();
+    await bot.reportLoaded('Anna', [message('a', 'Hallo')]);
+    await bot.reportLoaded('Anna', [message('x', 'Impostor')]);
+
+    await bot.reportLoaded('Anna', [message('a', 'Hallo'), message('b', 'Bis morgen')]);
+    await bot.reportLoaded('Anna', [message('x', 'Impostor')]);
+
+    expect(tg.texts().map((text) => (text.includes('same name') ? 'told' : text))).toEqual(['told', '💬 <b>Anna</b>\n[en] Bis morgen', 'told']);
+    expect(await bot.sameChat('Anna', ['a', 'b'])).toBe(true);
+  });
+
+  test('a Chat not seen yet is taken for the one of its name: nothing is known to compare', async () => {
+    const { bot } = setup();
+
+    expect(await bot.sameChat('Anna', ['x'])).toBe(true);
+  });
+
   test('new messages are translated into the user’s language and forwarded with the original, each once', async () => {
     const translator = fakeTranslator();
     const { bot, tg } = setup({ translator, settings: { showOriginal: true } });
@@ -335,7 +366,7 @@ describe('incoming messages', () => {
     const { bot, tg } = setup({ translator: fakeTranslator({ detected: 'en' }) });
     await bot.reportLoaded('Anna', history);
 
-    await bot.reportLoaded('Anna', [message('a', 'Hello')]);
+    await bot.reportLoaded('Anna', [...history, message('a', 'Hello')]);
 
     expect(tg.to(ownChat)).toEqual(['💬 <b>Anna</b>\nHello']);
   });
@@ -344,7 +375,7 @@ describe('incoming messages', () => {
     const { bot, tg } = setup({ translator: fakeTranslator({ detected: 'en' }), settings: { chats: [{ name: 'Family', contactLanguage: 'de' }] } });
     await bot.reportLoaded('Family', history);
 
-    await bot.reportLoaded('Family', [message('a', 'Hi', { sender: 'Contact C' })]);
+    await bot.reportLoaded('Family', [...history, message('a', 'Hi', { sender: 'Contact C' })]);
 
     expect(tg.to(ownChat)).toEqual(['💬 <b>Family</b> · Contact C\nHi']);
   });
@@ -353,7 +384,7 @@ describe('incoming messages', () => {
     const { bot, tg } = setup();
     await bot.reportLoaded('Anna', history);
 
-    await bot.reportLoaded('Anna', [message('photo')]);
+    await bot.reportLoaded('Anna', [...history, message('photo')]);
 
     expect(tg.to(ownChat)[0]).toContain('A message without text');
   });
@@ -362,7 +393,7 @@ describe('incoming messages', () => {
     const { bot, tg } = setup({ translator: fakeTranslator({ fail: true }) });
     await bot.reportLoaded('Anna', history);
 
-    await bot.reportLoaded('Anna', [message('a', 'Hallo')]);
+    await bot.reportLoaded('Anna', [...history, message('a', 'Hallo')]);
 
     expect(tg.to(ownChat)[0]).toContain('Hallo\n\n⚠️ <i>Not translated');
   });
@@ -372,9 +403,9 @@ describe('incoming messages', () => {
     await bot.reportLoaded('Anna', history);
     tg.failSends(true);
 
-    await bot.reportLoaded('Anna', [message('a', 'Hallo')]);
+    await bot.reportLoaded('Anna', [...history, message('a', 'Hallo')]);
     tg.failSends(false);
-    await bot.reportLoaded('Anna', [message('a', 'Hallo')]);
+    await bot.reportLoaded('Anna', [...history, message('a', 'Hallo')]);
 
     expect(errors).toHaveLength(1);
     expect(tg.to(ownChat)).toHaveLength(1);
@@ -384,9 +415,9 @@ describe('incoming messages', () => {
     const { bot, tg, store } = setup();
     await bot.reportLoaded('Anna', history);
 
-    await bot.reportLoaded('Someone else', [message('x', 'Hallo')]);
+    await bot.reportLoaded('Someone else', [...history, message('x', 'Hallo')]);
     await store.updateSettings({ enabled: false });
-    await bot.reportLoaded('Anna', [message('a', 'Hallo')]);
+    await bot.reportLoaded('Anna', [...history, message('a', 'Hallo')]);
 
     expect(tg.texts()).toEqual([]);
   });
@@ -396,7 +427,7 @@ describe('incoming messages', () => {
     await bot.reportLoaded('Anna', history);
     await store.updateSettings({ chats: [{ name: 'Ben', contactLanguage: 'de' }] });
 
-    await bot.reportLoaded('Ben', [message('b1', 'Hi')]);
+    await bot.reportLoaded('Ben', [...history, message('b1', 'Hi')]);
 
     expect(tg.texts()).toEqual([]);
   });
@@ -413,8 +444,8 @@ describe('several Translated Chats', () => {
   async function bothWrote(bot: ReturnType<typeof setup>['bot']) {
     await bot.reportLoaded('Anna', history);
     await bot.reportLoaded('Ben', history);
-    await bot.reportLoaded('Anna', [incoming('a1', 'Hallo')]);
-    await bot.reportLoaded('Ben', [incoming('b1', 'Salut')]);
+    await bot.reportLoaded('Anna', [...history, incoming('a1', 'Hallo')]);
+    await bot.reportLoaded('Ben', [...history, incoming('b1', 'Salut')]);
   }
 
   test('each Chat\u2019s new messages are forwarded under its name, and its history is kept apart', async () => {
@@ -510,7 +541,7 @@ describe('test mode: forwarding the user\u2019s own messages', () => {
     const { bot, tg } = setup({ settings: { forwardOwnMessages: true }, translator: fakeTranslator({ detected: 'en' }) });
     await bot.reportLoaded('Anna', history);
 
-    await bot.reportLoaded('Anna', [mine('m1', 'Hello me')]);
+    await bot.reportLoaded('Anna', [...history, mine('m1', 'Hello me')]);
 
     expect(tg.to(ownChat)).toEqual(['\ud83d\udcac <b>Anna</b> \u00b7 you (test mode)\nHello me']);
   });
@@ -521,7 +552,7 @@ describe('test mode: forwarding the user\u2019s own messages', () => {
     await bot.reportLoaded('Anna', history);
 
     await bot.handleUpdate(textFrom(ownChat, 'Hi'));
-    await bot.reportLoaded('Anna', [mine('sent-1', '[de] Hi')]);
+    await bot.reportLoaded('Anna', [...history, mine('sent-1', '[de] Hi')]);
 
     expect(tg.to(ownChat)).toHaveLength(1); // only the bot's answer about the send
   });
@@ -530,7 +561,7 @@ describe('test mode: forwarding the user\u2019s own messages', () => {
     const { bot, tg } = setup({ settings: { forwardOwnMessages: true } });
     await bot.reportLoaded('Anna', history);
 
-    await bot.reportLoaded('Anna', [mine('sent-2', '[de] Hi', { sentHere: true })]);
+    await bot.reportLoaded('Anna', [...history, mine('sent-2', '[de] Hi', { sentHere: true })]);
 
     expect(tg.texts()).toEqual([]);
   });
@@ -539,7 +570,7 @@ describe('test mode: forwarding the user\u2019s own messages', () => {
     const { bot, tg } = setup();
     await bot.reportLoaded('Anna', history);
 
-    await bot.reportLoaded('Anna', [mine('m1', 'Hello me')]);
+    await bot.reportLoaded('Anna', [...history, mine('m1', 'Hello me')]);
 
     expect(tg.texts()).toEqual([]);
   });
@@ -561,8 +592,8 @@ test('a Chat stored with no seen messages (from a page that read none) sets its 
   const { bot, tg, store } = setup();
   await store.setSeen('Anna', []);
 
-  await bot.reportLoaded('Anna', [{ id: 'old1', direction: 'in', text: 'Alt' }]);
-  await bot.reportLoaded('Anna', [{ id: 'old1', direction: 'in', text: 'Alt' }, { id: 'new1', direction: 'in', text: 'Neu' }]);
+  await bot.reportLoaded('Anna', [...history, { id: 'old1', direction: 'in', text: 'Alt' }]);
+  await bot.reportLoaded('Anna', [...history, { id: 'old1', direction: 'in', text: 'Alt' }, { id: 'new1', direction: 'in', text: 'Neu' }]);
 
   expect(tg.texts()).toHaveLength(1);
   expect(tg.texts()[0]).toContain('Neu');
@@ -573,7 +604,7 @@ describe('the original text in Telegram', () => {
     const { bot, tg } = setup({ settings: { showOriginal: false } });
     await bot.reportLoaded('Anna', history);
 
-    await bot.reportLoaded('Anna', [{ id: 'a', direction: 'in', text: 'Bis morgen' }]);
+    await bot.reportLoaded('Anna', [...history, { id: 'a', direction: 'in', text: 'Bis morgen' }]);
 
     expect(tg.to(ownChat)).toEqual(['\ud83d\udcac <b>Anna</b>\n[en] Bis morgen']);
   });
@@ -582,7 +613,7 @@ describe('the original text in Telegram', () => {
     const { bot, tg } = setup({ settings: { showOriginal: true } });
     await bot.reportLoaded('Anna', history);
 
-    await bot.reportLoaded('Anna', [{ id: 'a', direction: 'in', text: 'Bis morgen' }]);
+    await bot.reportLoaded('Anna', [...history, { id: 'a', direction: 'in', text: 'Bis morgen' }]);
 
     expect(tg.to(ownChat)).toEqual(['\ud83d\udcac <b>Anna</b>\n[en] Bis morgen\n\n<i>Bis morgen</i>']);
   });

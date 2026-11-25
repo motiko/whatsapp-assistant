@@ -109,6 +109,12 @@ export function serveTranslation(): void {
         if (sender.frameId !== 0 || !sender.url?.startsWith(whatsAppWeb)) return { ok: false, error: 'not from WhatsApp Web' };
         return { ok: true, ...(await bot.reportLoaded(message.chatName, readMessages(message.messages))) };
       }
+      case 'translation/same-chat': {
+        if (sender.frameId !== 0 || !sender.url?.startsWith(whatsAppWeb)) return { ok: false, error: 'not from WhatsApp Web' };
+        if (typeof message.chatName !== 'string' || !Array.isArray(message.loadedIds)) return { ok: false, error: 'malformed' };
+        const ids = message.loadedIds.filter((id: unknown): id is string => typeof id === 'string');
+        return { ok: true, same: await bot.sameChat(message.chatName, ids) };
+      }
       case 'translation/voice': {
         if (sender.frameId !== 0 || !sender.url?.startsWith(whatsAppWeb)) return { ok: false, error: 'not from WhatsApp Web' };
         if (typeof message.chatName !== 'string' || typeof message.messageId !== 'string' || typeof message.audio !== 'object') {

@@ -14,6 +14,7 @@ import {
   type PreviewReport,
   type TranslationReport,
   type VoiceReport,
+  type SameChatRequest,
 } from '../extension/messages';
 import type { ReportAnswer } from '../core/translation/translation-bot';
 import { createAudioTap } from '../whatsapp-web/audio-probe';
@@ -129,6 +130,12 @@ export default defineContentScript({
         };
         const answer = (await chrome.runtime.sendMessage(report)) as { ok?: boolean; error?: string } | undefined;
         if (!answer?.ok) throw new Error(`the Translation Bot did not take the voice note: ${answer?.error ?? 'no answer'}`);
+      },
+      async sameChat(chatName, loadedIds) {
+        const request: SameChatRequest = { type: 'translation/same-chat', chatName, loadedIds };
+        const answer = (await chrome.runtime.sendMessage(request)) as { ok?: boolean; same?: boolean; error?: string } | undefined;
+        if (!answer?.ok) throw new Error(`the Translation Bot did not answer: ${answer?.error ?? 'no answer'}`);
+        return answer.same === true;
       },
       async reportPreview(chatName, preview, unreadCount) {
         const report: PreviewReport = { type: 'translation/preview', chatName, ...preview, unreadCount };

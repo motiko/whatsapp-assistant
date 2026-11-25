@@ -55,9 +55,15 @@ function setup(open: string | undefined, settings: { enabled: boolean; chatNames
   let answer: ReportAnswer = {};
   let busy: string | undefined;
   let now = 0;
+  let same = true;
+  const sameAsked: { chatName: string; ids: string[] }[] = [];
   const watcher = createChatWatcher({
     page: chats.page,
     settings: async () => settings,
+    async sameChat(chatName, ids) {
+      sameAsked.push({ chatName, ids });
+      return same;
+    },
     async report(chatName, messages) {
       reports.push({ chatName, ids: messages.map((message) => message.id) });
       const given = answer;
@@ -80,6 +86,11 @@ function setup(open: string | undefined, settings: { enabled: boolean; chatNames
     reports,
     previews,
     voices,
+    sameAsked,
+    /** Whether the bot takes the open Chat for the Translated Chat of its name. */
+    setSame(value: boolean) {
+      same = value;
+    },
     /** What the bot answers to the next report. */
     answerNext(next: ReportAnswer) {
       answer = next;
@@ -258,6 +269,27 @@ describe('sending through the Chat Watcher', () => {
     expect(state.open).toBe('Ben');
   });
 
+  test('checks the opened Chat is the known one, by its messages, before sending', async () => {
+    const { watcher, state, sameAsked } = setup('Ben');
+    state.messages.set('Anna', [msg('a1'), msg('a2')]);
+
+    await watcher.send('Anna', 'Hallo');
+
+    expect(sameAsked).toEqual([{ chatName: 'Anna', ids: ['a1', 'a2'] }]);
+  });
+
+  test('sends nothing to a Chat that only shares the name', async () => {
+    const { watcher, state, setSame } = setup('Ben');
+    setSame(false);
+
+    const outcome = await watcher.send('Anna', 'Hallo');
+
+    expect(outcome.kind).toBe('failed');
+    expect(outcome.kind === 'failed' && outcome.detail).toContain('another Chat with the same name');
+    expect(state.sent).toEqual([]);
+    expect(state.open).toBe('Ben');
+  });
+
   test('stays in the Chat when it was already open', async () => {
     const { watcher, state } = setup('Anna');
 
@@ -357,6 +389,7 @@ test('the Chat Watcher marks the messages it sent, so they are never forwarded b
   const watcher = createChatWatcher({
     page: chats.page,
     settings: async () => ({ enabled: true, chatNames: ['Anna'] }),
+    sameChat: async () => true,
     async report(_chatName, messages) {
       reported.push(messages);
     },

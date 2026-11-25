@@ -187,7 +187,10 @@ function addChat() {
   if (settings.chats.some((chat) => chat.name === name)) return note(chatsHint, `\u201c${name}\u201d is already in the list.`, 'warn');
   newChat.value = '';
   note(chatsHint, '');
-  void save({ chats: [...settings.chats, { name, contactLanguage: newChatLanguage.value }] });
+  // Added (again): starts afresh, its messages so far taken as history, whatever Chat had that name before.
+  void Promise.all([store.setSeen(name, []), store.setListForwarded(name, []), store.setMismatchTold(name, false)]).then(() =>
+    save({ chats: [...settings.chats, { name, contactLanguage: newChatLanguage.value }] }),
+  );
 }
 $('add-chat').addEventListener('click', addChat);
 forwardOwn.addEventListener('change', () => void save({ forwardOwnMessages: forwardOwn.checked }));

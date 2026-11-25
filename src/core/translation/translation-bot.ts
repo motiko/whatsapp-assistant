@@ -64,6 +64,13 @@ export interface TranslationBot {
   /** The audio of a voice note `reportLoaded` asked for (or why it couldn't be had): transcribed, translated, forwarded. */
   reportVoice(chatName: string, messageId: string, result: VoiceAudio): Promise<void>;
   /**
+   * Whether the open Chat named `chatName`, whose loaded messages have
+   * `loadedIds`, is the Chat known by that name: it shows at least one
+   * message seen there before (or none were seen yet). Chats are found by
+   * name, which another Chat can take; their messages' ids it can't.
+   */
+  sameChat(chatName: string, loadedIds: readonly string[]): Promise<boolean>;
+  /**
    * A new message read from the Chat's row in the Chat list, without opening
    * it; `unreadCount` is the row's count with it. Forwarded once, and not
    * again when the Chat is opened later and its messages are reported.
@@ -374,6 +381,7 @@ export function createTranslationBot(deps: TranslationBotDeps): TranslationBot {
       debug('report ignored', { chat: chatName, why: ignored });
       return {};
     }
+    let mismatch = false;
     const fresh = await locked(async () => {
       const seen = await store.seen(chatName);
       const loadedIds = messages.map((message) => message.id);
@@ -394,6 +402,13 @@ export function createTranslationBot(deps: TranslationBotDeps): TranslationBot {
         return [];
       }
       const known = new Set(seen);
+      if (loadedIds.length > 0 && !loadedIds.some((id) => known.has(id))) {
+        // None of the messages known from this Chat: another Chat with its name, or so many new messages
+        // that the known ones are no longer loaded. Nothing is forwarded until it shows a known one again.
+        debug('not the known Chat: none of its known messages is shown; nothing forwarded', { chat: chatName, loaded: loadedIds.length });
+        mismatch = true;
+        return [];
+      }
       const unseen = newIncomingMessages(messages, known, { includeOwn: settings.forwardOwnMessages });
       // Messages already forwarded from the Chat list, now seen in the Chat: each matches one of them, oldest first.
       const listed = await store.listForwarded(chatName);
@@ -414,6 +429,11 @@ export function createTranslationBot(deps: TranslationBotDeps): TranslationBot {
       });
       return fresh;
     });
+    if (mismatch) {
+      await tellMismatch(chatName, settings);
+      return {};
+    }
+    if (await store.mismatchTold(chatName)) await store.setMismatchTold(chatName, false);
     const telegram = deps.telegram(settings.telegramToken);
     // Voice notes' audio is wanted when it can be transcribed or is to be forwarded.
     const audioWanted = deps.transcriber?.(settings) !== undefined || settings.voice.forwardAudio;
@@ -565,7 +585,25 @@ export function createTranslationBot(deps: TranslationBotDeps): TranslationBot {
     });
   }
 
-  return { handleUpdate, reportLoaded, reportVoice, reportPreview, startPairing };
+  /** Tells the user (once) that the Chat open under a Translated Chat's name shows none of its known messages. */
+  async function tellMismatch(chatName: string, settings: TranslationSettings): Promise<void> {
+    if (await store.mismatchTold(chatName)) return;
+    await store.setMismatchTold(chatName, true);
+    if (!settings.telegramToken || !settings.telegramChatId) return;
+    const text = [
+      `⚠️ The Chat named <b>${escapeHtml(chatName)}</b> in WhatsApp Web shows none of the messages known from it, so it may be another Chat with the same name.`,
+      'Nothing from it is forwarded, and no replies are sent to it, until it shows a known message again.',
+      'If it is the right Chat (many messages came in while the extension wasn’t watching), remove it in the extension’s options and add it again.',
+    ].join('\n\n');
+    await deps.telegram(settings.telegramToken).sendMessage(settings.telegramChatId, text).catch(logError);
+  }
+
+  async function sameChat(chatName: string, loadedIds: readonly string[]): Promise<boolean> {
+    const seen = await store.seen(chatName);
+    return !seen || seen.length === 0 || loadedIds.some((id) => seen.includes(id));
+  }
+
+  return { handleUpdate, reportLoaded, reportVoice, reportPreview, sameChat, startPairing };
 }
 
 const helpText = [

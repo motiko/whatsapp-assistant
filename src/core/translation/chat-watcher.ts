@@ -63,6 +63,12 @@ export interface ChatWatcherOptions {
    * forwards the new ones; it may answer with voice notes whose audio it wants.
    */
   report(chatName: string, messages: LoadedMessage[]): Promise<ReportAnswer | void>;
+  /**
+   * Whether the open Chat, with these loaded message ids, is the Translated
+   * Chat `chatName` (shows a message known from it). Asked before sending:
+   * Chats are opened by name, which another Chat can take.
+   */
+  sameChat(chatName: string, loadedIds: string[]): Promise<boolean>;
   /** Hands the Translation Bot a voice note's audio it asked for (or why it couldn't be had). */
   reportVoice?(chatName: string, messageId: string, audio: VoiceAudio): Promise<void>;
   /**
@@ -293,7 +299,15 @@ export function createChatWatcher(options: ChatWatcherOptions): ChatWatcher {
       await reportOpen(chatName).catch(logError);
       let outcome: SendOutcome;
       try {
-        outcome = await page.sendMessage(text);
+        const loadedIds = (await page.readMessages()).map((message) => message.id);
+        if (!(await options.sameChat(chatName, loadedIds))) {
+          outcome = {
+            kind: 'failed',
+            detail: 'the Chat WhatsApp Web opened under that name shows none of the messages known from it, so it may be another Chat with the same name; nothing was sent',
+          };
+        } else {
+          outcome = await page.sendMessage(text);
+        }
       } catch (error) {
         outcome = { kind: 'failed', detail: errorText(error) };
       }
