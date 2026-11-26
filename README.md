@@ -131,6 +131,16 @@ The bar may stay a few seconds after the run. The toolbar icon still opens the p
    Band names the two records it connects. Overlap (repeated messages) is left alone. The panel says
    when this happens, and warns if the missed messages couldn't be recorded.
 
+## Hide avatars
+
+On the options page (right-click the toolbar icon > **Options**), under **WhatsApp Web**, tick
+**Hide avatars**. It applies to every open WhatsApp Web tab straight away and is kept across
+restarts. WhatsApp Web shows no avatars anywhere: profile photos and the placeholder icons
+for contacts, groups and communities without one, in the Chat list, Chat headers, next to group
+messages and elsewhere. Their space stays empty, so nothing moves. A Chat Record made while it is on
+has no avatars either, as it shows the page as WhatsApp Web displays it. The avatar selectors are not
+yet checked against the real page (see `src/whatsapp-web/selectors.ts`).
+
 ## Auto-translation through Telegram
 
 Chosen Chats, the **Translated Chats**, can be translated both ways through your own Telegram bot
@@ -208,6 +218,12 @@ Tests sit at two seams (see the spec's Testing Decisions in
 - **Pending Continuations** (`src/extension/continuation-store.test.ts`): what is kept per Chat, and
   that only ids, days, times, the request and the failure reason are written, through an in-memory
   stand-in for `chrome.storage.session`.
+- **Hiding avatars** (`src/whatsapp-web/avatars.test.ts`): profile photos and placeholders, also
+  ones added later, are hidden without moving anything, other icons and text are not, and turning it
+  off shows them again; against the group Chat snapshot with avatars added (images blocked, so nothing
+  is fetched).
+- **Settings** (`src/extension/settings.test.ts`): defaults, changes and watching, through an
+  in-memory stand-in for `chrome.storage.local`.
 - **Date Range fields** (`src/ui/date-range-fields.test.ts`): pickers, presets and validation,
   driven through the DOM with a fixed "today".
 - **Panel while recording** (`src/ui/record-panel.test.ts`): progress text, Cancel, the notice, the
@@ -249,7 +265,9 @@ Tests sit at two seams (see the spec's Testing Decisions in
 | `src/extension/` | Chrome-side pieces: the debugger Camera (`debugger-camera.ts`, hides own UI) and the background worker's capture sessions (`capture-sessions.ts`: attach, focus emulation, `Page.captureScreenshot`, detach), clipboard and download output, messages to the background worker, pending Continuations in session storage (`continuation-store.ts`), and auto-translation's background side (`translation-service.ts`: Telegram polling, reaching the WhatsApp Web tab) |
 | `src/ui/record-panel.ts` | Header button and panel, including progress, Cancel and the lock over WhatsApp Web while recording |
 | `src/ui/date-range-fields.ts` | The panel's From/To pickers, presets (including Full Chat) and validation |
-| `src/entrypoints/` | WXT entry points: content script (wiring), background worker (capture sessions, toolbar icon, auto-translation) and the options page (auto-translation settings) |
+| `src/extension/settings.ts`, `src/entrypoints/options/` | Settings (Hide avatars) in `chrome.storage.local`, and the options page that sets them |
+| `src/whatsapp-web/avatars.ts` | Hiding or showing WhatsApp Web's avatars |
+| `src/entrypoints/` | WXT entry points: content script (wiring), background worker (capture sessions, toolbar icon, auto-translation) and the options page (auto-translation settings and Hide avatars) |
 
 ## Permissions and privacy
 
@@ -267,7 +285,8 @@ Tests sit at two seams (see the spec's Testing Decisions in
 - `clipboardWrite`: lets the content script put the PNG on the clipboard.
 - `storage`: `chrome.storage.session`, for pending Continuations (below). The background worker
   lets the content script use it (`setAccessLevel`). `chrome.storage.local` for the auto-translation
-  settings (including the bot token and LLM key, in the clear) and the bot's state.
+  settings (including the bot token and LLM key, in the clear), the bot's state, and whether avatars
+  are hidden.
 - No `downloads` permission: **Download** clicks a download link from the content script, which needs
   none. The cost is that the extension can't see where Chrome saved the file, so the confirmation
   names the file and your Downloads folder (if Chrome is set to ask where to save, it is wherever you

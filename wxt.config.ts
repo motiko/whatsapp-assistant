@@ -28,7 +28,8 @@ export default defineConfig({
     // clipboardWrite: writing the PNG to the clipboard.
     // storage: chrome.storage.session, for pending Continuations (ids and
     // dates only; in memory, cleared when Chrome closes); chrome.storage.local
-    // for the translation settings and bot state.
+    // for the translation settings and bot state, and the WhatsApp Web settings
+    // (Hide avatars, src/extension/settings.ts).
     // No `downloads`: Download clicks a download link in the content script,
     // which needs no permission (see src/extension/download.ts).
     // alarms: restarts the Telegram bot's polling after Chrome stops the worker.

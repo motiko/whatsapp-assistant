@@ -19,6 +19,8 @@ import {
 import type { ReportAnswer } from '../core/translation/translation-bot';
 import { createAudioTap } from '../whatsapp-web/audio-probe';
 import { createDebuggerCamera } from '../extension/debugger-camera';
+import { createSettingsStore } from '../extension/settings';
+import { setAvatarsHidden } from '../whatsapp-web/avatars';
 import { createRecordPanel, type CreateResult } from '../ui/record-panel';
 import { keepInChatHeader } from '../whatsapp-web/chat-header';
 import { createChatsPage } from '../whatsapp-web/chats-page';
@@ -92,6 +94,7 @@ export default defineContentScript({
     const camera = createDebuggerCamera({ hideOwnUi: () => panel.hide() });
     const recorder = createChatRecorder({ page, camera });
 
+    createSettingsStore().watch((settings) => setAvatarsHidden(document, settings.hideAvatars));
     keepInChatHeader(document, panel.button);
 
     // Auto-translation: watch the Translated Chats and send the Translation Bot's replies (see src/core/translation/).

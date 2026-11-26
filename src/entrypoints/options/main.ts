@@ -13,6 +13,7 @@ import type {
   StartPairingRequest,
   WakeBotRequest,
 } from '../../extension/messages';
+import { createSettingsStore } from '../../extension/settings';
 import { botStatusKey, transcriberFor, translatorFor, type BotStatus } from '../../extension/translation-service';
 
 /**
@@ -507,3 +508,11 @@ void llmModels.load(false);
 void sttModels.load(false);
 void showDebugLog();
 showBotStatus((await chrome.storage.local.get(botStatusKey))[botStatusKey] as BotStatus | undefined);
+
+// WhatsApp Web settings (not auto-translation's): Hide avatars.
+const pageSettings = createSettingsStore();
+const hideAvatars = $<HTMLInputElement>('hide-avatars');
+pageSettings.watch((current) => {
+  hideAvatars.checked = current.hideAvatars;
+});
+hideAvatars.addEventListener('change', () => void pageSettings.update({ hideAvatars: hideAvatars.checked }));

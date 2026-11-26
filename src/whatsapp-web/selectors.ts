@@ -115,6 +115,21 @@ export const selectors = {
   voicePlayButton: 'button[aria-label*="play" i], [role="button"][aria-label*="play" i]',
   /** An audio element WhatsApp Web already gave its decrypted audio (a `blob:` URL). */
   voiceAudioElement: 'audio[src^="blob:"], audio source[src^="blob:"]',
+
+  /**
+   * Every avatar on the page: profile photos (served from WhatsApp's
+   * profile-picture host) and the placeholder icons shown for contacts,
+   * groups and communities without one. In the Chat list, Chat headers,
+   * next to group messages, the nav rail and contact panels alike.
+   * (Unverified against the real page.)
+   */
+  avatar: [
+    'img[src^="https://pps.whatsapp.net/"]',
+    '[data-icon^="default-user"]',
+    '[data-icon^="default-contact"]',
+    '[data-icon^="default-group"]',
+    '[data-icon^="default-community"]',
+  ].join(', '),
 } as const;
 
 /**
